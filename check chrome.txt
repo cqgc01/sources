@@ -1,0 +1,41 @@
+# Define las rutas de instalación comunes
+$chromePaths = @(
+    "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+    "$env:ProgramFiles(x86)\Google\Chrome\Application\chrome.exe"
+)
+
+$edgePaths = @(
+    "$env:ProgramFiles (x86)\Microsoft\Edge\Application\msedge.exe",
+    "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+)
+
+# Versión mínima parcheada
+$chromeMinVersion = [version]"142.0.7444.137"   # CVE-2025-12726
+$chromeV8MinVersion = [version]"142.0.7444.135" # CVE-2025-12727
+
+# Función para verificar versión
+function Check-BrowserVersion {
+    param (
+        [string[]]$Paths,
+        [string]$BrowserName
+    )
+    foreach ($path in $Paths) {
+        if (Test-Path $path) {
+            $ver = (Get-Item $path).VersionInfo.ProductVersion
+            $version = [version]$ver
+            Write-Host "$BrowserName encontrado: $ver"
+
+            if ($version -lt $chromeMinVersion) {
+                Write-Warning "$BrowserName está DESACTUALIZADO y vulnerable a CVE-2025-12726"
+            } elseif ($version -lt $chromeV8MinVersion) {
+                Write-Warning "$BrowserName está DESACTUALIZADO y vulnerable a CVE-2025-12727"
+            } else {
+                Write-Host "$BrowserName está actualizado y seguro frente a estas vulnerabilidades."
+            }
+        }
+    }
+}
+
+# Ejecutar verificación
+Check-BrowserVersion -Paths $chromePaths -BrowserName "Google Chrome"
+Check-BrowserVersion -Paths $edgePaths -BrowserName "Microsoft Edge"
