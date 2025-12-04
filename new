@@ -1,0 +1,87 @@
+# Define las rutas de instalación comunes
+$chromePaths = @(
+    "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+    "$env:ProgramFiles(x86)\Google\Chrome\Application\chrome.exe"
+)
+
+$edgePaths = @(
+    "$env:ProgramFiles (x86)\Microsoft\Edge\Application\msedge.exe",
+    "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+)
+
+# Versión mínima parcheada
+$chromeMinVersion = [version]"142.0.7444.137"   # CVE-2025-12726
+$chromeV8MinVersion = [version]"142.0.7444.135" # CVE-2025-12727
+
+# Función para verificar versión
+function Check-BrowserVersion {
+    param (
+        [string[]]$Paths,
+        [string]$BrowserName
+    )
+    foreach ($path in $Paths) {
+        if (Test-Path $path) {
+            $ver = (Get-Item $path).VersionInfo.ProductVersion
+            $version = [version]$ver
+            Write-Host "$BrowserName encontrado: $ver"
+
+            if ($version -lt $chromeMinVersion) {
+                Write-Warning "$BrowserName está DESACTUALIZADO y vulnerable a CVE-2025-12726"
+            } elseif ($version -lt $chromeV8MinVersion) {
+                Write-Warning "$BrowserName está DESACTUALIZADO y vulnerable a CVE-2025-12727"
+            } else {
+                Write-Host "$BrowserName está actualizado y seguro frente a estas vulnerabilidades."
+            }
+        }
+    }
+}
+
+# Ejecutar verificación
+Check-BrowserVersion -Paths $chromePaths -BrowserName "Google Chrome"
+Check-BrowserVersion -Paths $edgePaths -BrowserName "Microsoft Edge"
+
+
+# Rutas comunes de instalación de Edge
+$edgePaths = @(
+    "$env:ProgramFiles (x86)\Microsoft\Edge\Application\msedge.exe",
+    "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+)
+
+# Función para obtener la versión instalada
+function Get-EdgeVersion {
+    param([string[]]$Paths)
+    foreach ($path in $Paths) {
+        if (Test-Path $path) {
+            $version = (Get-Item $path).VersionInfo.ProductVersion
+            Write-Host "Microsoft Edge encontrado: $version"
+            return $version
+        }
+    }
+    Write-Warning "Microsoft Edge no está instalado en las rutas esperadas."
+    return $null
+}
+
+# Función para actualizar Edge
+function Update-Edge {
+    Write-Host "Descargando instalador de Edge..."
+    $installerUrl = "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/latest/MicrosoftEdgeEnterpriseX64.msi"
+    $installerPath = "$env:TEMP\MicrosoftEdgeInstaller.msi"
+
+    Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath
+
+    Write-Host "Instalando Microsoft Edge (modo silencioso)..."
+    Start-Process msiexec.exe -ArgumentList "/i `"$installerPath`" /quiet /norestart" -Wait
+
+    Remove-Item $installerPath
+    Write-Host "Microsoft Edge actualizado correctamente."
+}
+
+# Ejecutar funciones
+$edgeVersion = Get-EdgeVersion -Paths $edgePaths
+
+if ($edgeVersion) {
+    Update-Edge
+    # Verificar versión después de actualizar
+    Start-Sleep -Seconds 5
+    Get-EdgeVersion -Paths $edgePaths
+}
