@@ -1,0 +1,99 @@
+# -------------------------------
+# Definir rutas de instalación comunes
+# -------------------------------
+$chromePaths = @(
+    "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+    "$env:ProgramFiles(x86)\Google\Chrome\Application\chrome.exe"
+)
+
+$edgePaths = @(
+    "$env:ProgramFiles (x86)\Microsoft\Edge\Application\msedge.exe",
+    "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+)
+
+# -------------------------------
+# Versiones mínimas parcheadas
+# -------------------------------
+$chromeMinVersion = [version]"142.0.7444.137"   # CVE-2025-12726
+$chromeV8MinVersion = [version]"142.0.7444.135" # CVE-2025-12727
+$edgeMinVersion = [version]"142.0.7444.135"     # CVE-2025-12726/12727 (Edge usa motor Chromium)
+
+# -------------------------------
+# Función para verificar versión de navegador
+# -------------------------------
+function Check-BrowserVersion {
+    param (
+        [string[]]$Paths,
+        [string]$BrowserName,
+        [version]$MinVersion,
+        [version]$V8MinVersion = $null
+    )
+
+    foreach ($path in $Paths) {
+        if (Test-Path $path) {
+            $ver = (Get-Item $path).VersionInfo.ProductVersion
+            $version = [version]$ver
+            Write-Host "$BrowserName encontrado: $ver"
+
+            if ($version -lt $MinVersion) {
+                Write-Warning "$BrowserName está DESACTUALIZADO y vulnerable a CVE-2025-12726"
+            } elseif ($V8MinVersion -and $version -lt $V8MinVersion) {
+                Write-Warning "$BrowserName está DESACTUALIZADO y vulnerable a CVE-2025-12727"
+            } else {
+                Write-Host "$BrowserName está actualizado y seguro frente a estas vulnerabilidades."
+            }
+        } else {
+            Write-Warning "$BrowserName no se encontró en la ruta $path"
+        }
+    }
+}
+
+# -------------------------------
+# Verificar Chrome y Edge
+# -------------------------------
+Check-BrowserVersion -Paths $chromePaths -BrowserName "Google Chrome" -MinVersion $chromeMinVersion -V8MinVersion $chromeV8MinVersion
+Check-BrowserVersion -Paths $edgePaths -BrowserName "Microsoft Edge" -MinVersion $edgeMinVersion
+
+# -------------------------------
+# Función para obtener la versión instalada de Edge
+# -------------------------------
+function Get-EdgeVersion {
+    param([string[]]$Paths)
+    foreach ($path in $Paths) {
+        if (Test-Path $path) {
+            $version = (Get-Item $path).VersionInfo.ProductVersion
+            Write-Host "Microsoft Edge encontrado: $version"
+            return $version
+        }
+    }
+    Write-Warning "Microsoft Edge no está instalado en las rutas esperadas."
+    return $null
+}
+
+# -------------------------------
+# Función para actualizar Edge
+# -------------------------------
+function Update-Edge {
+    Write-Host "Descargando instalador de Edge..."
+    $installerUrl = "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/latest/MicrosoftEdgeEnterpriseX64.msi"
+    $installerPath = "$env:TEMP\MicrosoftEdgeInstaller.msi"
+
+    Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath
+
+    Write-Host "Instalando Microsoft Edge (modo silencioso)..."
+    Start-Process msiexec.exe -ArgumentList "/i `"$installerPath`" /quiet /norestart" -Wait
+
+    Remove-Item $installerPath
+    Write-Host "Microsoft Edge actualizado correctamente."
+}
+
+# -------------------------------
+# Ejecutar actualización de Edge si está instalado
+# -------------------------------
+$edgeVersion = Get-EdgeVersion -Paths $edgePaths
+
+if ($edgeVersion) {
+    Update-Edge
+    Start-Sleep -Seconds 5
+    Get-EdgeVersion -Paths $edgePaths
+}
