@@ -1,3 +1,81 @@
+# 1. Configuración de rutas y variables
+$serviceName = "HSLS14.2"
+$apacheBin = "C:\HSLS-14.2\Apache\bin"
+$apacheExe = "$apacheBin\httpd.exe"
+$regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName"
+
+Write-Host "--- UNIFICADO: LIMPIEZA, DESBLOQUEO Y REINSTALACIÓN DE $serviceName ---" -ForegroundColor Cyan
+
+# 2. Detección de PID y Matado de procesos específicos
+Write-Host "[1/6] Consultando PID actual de $serviceName..." -ForegroundColor Yellow
+$query = sc.exe queryex $serviceName
+if ($LASTEXITCODE -eq 0) {
+    $pidLine = $query | Select-String "PID"
+    $pid = ($pidLine -replace '[^\d]', '').Trim()
+
+    if ($pid -and $pid -ne "0") {
+        Write-Host "PID Detectado: $pid. Matando proceso específico..." -ForegroundColor Yellow
+        taskkill.exe /F /PID $pid 2>$null
+    } else {
+        Write-Host "El PID es 0. El servicio no está corriendo activamente." -ForegroundColor Gray
+    }
+}
+
+# 3. Limpieza de seguridad (Matar cualquier httpd.exe huérfano)
+Write-Host "[2/6] Limpiando procesos genéricos de Apache..." -ForegroundColor Yellow
+taskkill.exe /F /IM httpd.exe /T 2>$null
+Start-Sleep -Seconds 2
+
+# 4. Detener y borrar el servicio de la lista de Windows
+Write-Host "[3/6] Eliminando servicio de la base de datos de Windows..." -ForegroundColor Yellow
+if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
+    Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+}
+sc.exe delete $serviceName | Out-Null
+Write-Host "Servicio marcado para eliminación." -ForegroundColor Gray
+
+# 5. Limpieza agresiva del Registro (Regedit)
+Write-Host "[4/6] Borrando entradas residuales en el Registro..." -ForegroundColor Yellow
+if (Test-Path $regPath) {
+    Remove-Item -Path $regPath -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "Registro limpiado con éxito." -ForegroundColor Gray
+}
+
+# 6. Instalación Limpia (Modo Directo con Log de errores)
+Write-Host "[5/6] Registrando el servicio nuevamente..." -ForegroundColor Cyan
+if (Test-Path $apacheExe) {
+    Set-Location $apacheBin
+    $p = Start-Process -FilePath $apacheExe -ArgumentList "-k install -n $serviceName" -NoNewWindow -PassThru -Wait -RedirectStandardError "install_error.log"
+    
+    if ($p.ExitCode -eq 0) {
+        Write-Host "¡Servicio instalado correctamente!" -ForegroundColor Green
+    } else {
+        Write-Host "Error durante la instalación. Código: $($p.ExitCode)" -ForegroundColor Red
+        if (Test-Path "install_error.log") { Get-Content "install_error.log" }
+    }
+} else {
+    Write-Host "ERROR CRÍTICO: No se encontró el ejecutable en $apacheExe" -ForegroundColor Red
+    Read-Host "Presiona ENTER para salir"; exit
+}
+
+# 7. Intento de inicio final y validación
+Write-Host "[6/6] Iniciando el servicio..." -ForegroundColor Cyan
+Start-Service -Name $serviceName -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 3
+
+$finalStatus = (Get-Service $serviceName -ErrorAction SilentlyContinue).Status
+if ($finalStatus -eq "Running") {
+    Write-Host "¡PROCESO COMPLETADO! El servicio $serviceName está en ejecución." -ForegroundColor Green
+} else {
+    Write-Host "ADVERTENCIA: El servicio no subió automáticamente." -ForegroundColor Red
+    Write-Host "Sugerencia: Ejecuta '.\httpd.exe -t' en la carpeta bin para ver errores de sintaxis." -ForegroundColor Yellow
+}
+
+Write-Host "`n------------------------------------------------"
+Read-Host "Presiona ENTER para finalizar"
+
+############################ ********************************
 ## desinatalar hsls
 
 # 1. Configuración de rutas y variables
@@ -93,7 +171,7 @@ if ($LASTEXITCODE -eq 0) {
 Write-Host "`nProceso completado." -ForegroundColor Green
 
 
-
+######################## *************************************
 
 
 ##### vlaida librerias openssl
@@ -674,6 +752,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
