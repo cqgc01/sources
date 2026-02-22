@@ -1,3 +1,58 @@
+
+################################# forzando registro
+
+$serviceName = "HSLS14.2"
+$apacheBin = "C:\HSLS-14.2\Apache\bin"
+$apacheExe = "$apacheBin\httpd.exe"
+
+Write-Host "--- FORZANDO REGISTRO DE $serviceName ---" -ForegroundColor Cyan
+
+# 1. LIMPIEZA RADICAL DE PROCESOS
+Write-Host "Paso 1: Matando procesos bloqueantes..." -ForegroundColor Yellow
+taskkill /F /IM httpd.exe /T 2>$null
+taskkill /F /IM sc.exe /T 2>$null
+Start-Sleep -Seconds 2
+
+# 2. BORRADO TOTAL DEL SERVICIO (LISTA Y REGISTRO)
+Write-Host "Paso 2: Borrando servicio previo..." -ForegroundColor Yellow
+sc.exe delete $serviceName 2>$null
+Remove-Item -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName" -Recurse -Force -ErrorAction SilentlyContinue
+
+# 3. REGISTRO MANUAL (SIN ESPERAR RESPUESTA)
+Write-Host "Paso 3: Intentando registro rápido..." -ForegroundColor Cyan
+Set-Location $apacheBin
+# Ejecutamos el registro en segundo plano para que no bloquee PowerShell
+$proc = Start-Process -FilePath $apacheExe -ArgumentList "-k install -n $serviceName" -NoNewWindow -PassThru
+$proc | Wait-Process -Timeout 5 -ErrorAction SilentlyContinue
+
+# Si sigue pegado tras 5 segundos, lo matamos (el registro suele ser instantáneo)
+if (-not $proc.HasExited) {
+    Write-Host "El instalador se colgó. Forzando cierre para continuar..." -ForegroundColor Red
+    $proc | Stop-Process -Force
+}
+
+# 4. VERIFICACIÓN DE PUERTOS (Culpable común del bloqueo)
+Write-Host "Paso 4: Verificando si el puerto 80/443 está libre..." -ForegroundColor Cyan
+$port80 = Get-NetTCPConnection -LocalPort 80 -ErrorAction SilentlyContinue
+if ($port80) {
+    $owner = Get-Process -Id $port80.OwningProcess[0]
+    Write-Host "¡PUERTO 80 OCUPADO por: $($owner.ProcessName)! Por eso Apache no sube." -ForegroundColor Red
+}
+
+# 5. INTENTO DE INICIO POR CMD
+Write-Host "Paso 5: Intentando arranque..." -ForegroundColor Cyan
+cmd.exe /c "net start $serviceName"
+
+Write-Host "`n------------------------------------------------"
+Read-Host "Proceso terminado. Presiona ENTER para salir"
+
+
+
+
+
+
+##############################
+
 # 1. Configuración de rutas y variables
 $serviceName = "HSLS14.2"
 $apacheBin = "C:\HSLS-14.2\Apache\bin"
@@ -752,6 +807,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
