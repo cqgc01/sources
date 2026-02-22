@@ -1,6 +1,6 @@
 # 1. Configuración de rutas
-$apacheBin = "C:\HSL14.2\Apache\bin"
-$serviceName = "HSL14.2"
+$apacheBin = "C:\HSLS-14.2\Apache\bin"
+$serviceName = "HSLS14.2"
 $maxRetries = 10
 
 Write-Host "--- Iniciando instalación y control de reintentos ---" -ForegroundColor Cyan
@@ -75,3 +75,4 @@ if (-not $success) {
 }
 
 Write-Host "`nProceso finalizado."
+
