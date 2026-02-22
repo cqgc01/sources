@@ -1,53 +1,68 @@
 ##### monitoriear mistras sube el servicio
 
-$serviceName = "HSLS14.2"
-$logFile = "C:\HSL14.2\Apache\logs\error.log" # Ajusta si tu ruta es distinta
 
-Write-Host "--- Iniciando Monitoreo de Diagnóstico para $serviceName ---" -ForegroundColor Cyan
-Write-Host "Paso 1: Limpiando errores antiguos del Visor de Eventos..." -ForegroundColor Gray
 
-# 1. Obtener la hora actual para filtrar solo eventos nuevos
-$startTime = Get-Date
+$serviceName = "HSL14.2"
+$apacheExe = "C:\HSL14.2\Apache\bin\httpd.exe"
+$maxIntentos = 5
+$intento = 1
+$subio = $false
 
-# 2. Intentar iniciar el servicio en segundo plano
-Write-Host "Paso 2: Intentando iniciar el servicio..." -ForegroundColor Yellow
-Start-Service -Name $serviceName -ErrorAction SilentlyContinue
+Write-Host "--- Iniciando Bucle de Recuperación de $serviceName ---" -ForegroundColor Cyan
 
-# 3. Esperar unos segundos para que Windows registre el fallo (Error 1053 suele tardar)
-Write-Host "Esperando respuesta del sistema..." -ForegroundColor Gray
-Start-Sleep -Seconds 5
-
-# 4. Diagnóstico Automático
-$serviceStatus = Get-Service $serviceName
-
-if ($serviceStatus.Status -ne "Running") {
-    Write-Host "`n[!] EL SERVICIO NO SUBIÓ. Analizando causas..." -ForegroundColor Red
-
-    # BUSCAR EN EL VISOR DE EVENTOS (System y Application)
-    Write-Host "`n--- ERRORES ENCONTRADOS EN WINDOWS (Últimos 2 minutos) ---" -ForegroundColor White
-    Get-WinEvent -FilterHashtable @{
-        LogName = 'System','Application'
-        StartTime = $startTime
-        Level = 2 # Solo Errores
-    } -ErrorAction SilentlyContinue | Select-Object TimeCreated, Message | Format-List
-
-    # BUSCAR EN EL LOG DE APACHE
-    if (Test-Path $logFile) {
-        Write-Host "--- ÚLTIMAS LÍNEAS DEL ERROR.LOG DE APACHE ---" -ForegroundColor White
-        Get-Content $logFile -Tail 10
+while ($intento -le $maxIntentos -and -not $subio) {
+    Write-Host "`n[Intento $intento de $maxIntentos]" -ForegroundColor Yellow
+    Write-Host "------------------------------------"
+    
+    # 1. Limpieza preventiva: Matar cualquier proceso huérfano antes de intentar
+    $query = sc.exe queryex $serviceName
+    $pidLine = $query | Select-String "PID"
+    $pid = ($pidLine -replace '[^\d]', '').Trim()
+    
+    if ($pid -and $pid -ne "0") {
+        Write-Host "Limpiando proceso bloqueado (PID $pid)..." -ForegroundColor Gray
+        taskkill.exe /F /PID $pid 2>$null
+        Start-Sleep -Seconds 2
     }
 
-    # PRUEBA DE SINTAXIS MANUAL (La prueba definitiva)
-    Write-Host "`n--- PRUEBA DE SINTAXIS (httpd.exe -t) ---" -ForegroundColor White
-    & "C:\HSL14.2\Apache\bin\httpd.exe" -t 2>&1
+    # 2. Intentar iniciar el servicio
+    Write-Host "Iniciando servicio..." -ForegroundColor White
+    Start-Service -Name $serviceName -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 4 # Tiempo para que Windows procese el inicio
 
-} else {
-    Write-Host "¡ÉXITO! El servicio está corriendo correctamente." -ForegroundColor Green
+    # 3. Verificar estado
+    $status = (Get-Service $serviceName).Status
+    if ($status -eq "Running") {
+        Write-Host "¡EXITO! El servicio $serviceName ya está corriendo." -ForegroundColor Green
+        $subio = $true
+    } else {
+        Write-Host "FALLÓ: El servicio sigue detenido." -ForegroundColor Red
+        
+        # 4. Diagnóstico rápido del intento fallido
+        Write-Host "Revisando configuración..." -ForegroundColor Gray
+        $check = & $apacheExe -t 2>&1
+        if ($check -match "Syntax error") {
+            Write-Host "¡ERROR DE CONFIGURACIÓN DETECTADO!" -ForegroundColor Red
+            Write-Host $check -ForegroundColor Magenta
+            Write-Host "Abortando: El servicio no subirá hasta que corrijas esto."
+            break # Si hay error de sintaxis, no tiene sentido seguir intentando
+        }
+        
+        $intento++
+        if ($intento -le $maxIntentos) { Write-Host "Reintentando en 3 segundos..." -ForegroundColor Gray; Start-Sleep -Seconds 3 }
+    }
 }
 
-Write-Host "`n------------------------------------------------"
-Read-Host "Monitoreo finalizado. Presiona ENTER para salir"
+if (-not $subio) {
+    Write-Host "`n[!] No se pudo iniciar el servicio tras $maxIntentos intentos." -ForegroundColor Red
+    Write-Host "RECOMENDACIÓN: Revisa el Visor de Eventos (eventvwr.msc) o los Logs de Apache."
+}
 
+Write-Host "`n------------------------------------------"
+Read-Host "Proceso terminado. Presiona ENTER para salir"
+
+
+######
 
 
 
@@ -653,6 +668,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
