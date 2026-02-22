@@ -1,4 +1,56 @@
 
+
+# 1. Configuración de rutas
+$serviceName = "HSLS14.2"
+$apacheBin = "C:\HSLS-14.2\Apache\bin"
+$apacheExe = "$apacheBin\httpd.exe"
+$logFile = "C:\HSLS-14.2\Apache\logs\error.log"
+
+Write-Host "--- SOLUCIONANDO ERROR 1053 EN $serviceName ---" -ForegroundColor Cyan
+
+# 2. Limpieza de procesos previos para evitar bloqueos de archivos
+Write-Host "[1/4] Limpiando procesos huérfanos..." -ForegroundColor Yellow
+taskkill /F /IM httpd.exe /T 2>$null
+Start-Sleep -Seconds 2
+
+# 3. PRUEBA DE FUEGO: ¿Por qué no arranca? (Validación de Sintaxis)
+Write-Host "[2/4] Validando sintaxis de httpd.conf..." -ForegroundColor Cyan
+Set-Location $apacheBin
+$syntaxCheck = & $apacheExe -t 2>&1
+
+if ($syntaxCheck -match "Syntax error" -or $syntaxCheck -match "error") {
+    Write-Host "¡ERROR DE CONFIGURACIÓN DETECTADO!" -ForegroundColor Red
+    Write-Host "DETALLE: $syntaxCheck" -ForegroundColor Magenta
+    Write-Host "El servicio NUNCA subirá con ese error. Corrígelo en el .conf y reintenta." -ForegroundColor Yellow
+    Read-Host "Presiona ENTER para salir"; exit
+} else {
+    Write-Host "Sintaxis OK. El problema es de tiempo o permisos." -ForegroundColor Green
+}
+
+# 4. Aumento del tiempo de espera en el Registro (Timeout)
+Write-Host "[3/4] Aumentando tiempo de respuesta de servicios a 60 seg..." -ForegroundColor Yellow
+$regPath = "HKLM:\SYSTEM\CurrentControlSet\Control"
+Set-ItemProperty -Path $regPath -Name "ServicesPipeTimeout" -Value 60000 -ErrorAction SilentlyContinue
+
+# 5. Intento de inicio final
+Write-Host "[4/4] Intentando iniciar el servicio..." -ForegroundColor Cyan
+net start $serviceName
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR 1053 PERSISTE. Leyendo últimas líneas del log de errores..." -ForegroundColor Red
+    if (Test-Path $logFile) {
+        Get-Content $logFile -Tail 10 | Write-Host -ForegroundColor Gray
+    }
+} else {
+    Write-Host "¡ÉXITO! El servicio HSLS14.2 ha iniciado." -ForegroundColor Green
+}
+
+Write-Host "`n------------------------------------------------"
+Read-Host "Presiona ENTER para finalizar"
+
+
+
+
 ################################# forzando registro
 
 $serviceName = "HSLS14.2"
@@ -807,6 +859,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
