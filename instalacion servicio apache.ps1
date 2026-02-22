@@ -1,3 +1,36 @@
+#### DETIENE SERVICIOS DE HSLS
+# 1. Configuración del nombre del servicio
+$serviceName = "HSLS14.2"
+
+Write-Host "--- Buscando PID del servicio $serviceName ---" -ForegroundColor Cyan
+
+# 2. Ejecutar sc queryex y filtrar la línea del PID
+$query = sc.exe queryex $serviceName | Select-String "PID"
+
+if ($query) {
+    # Extraer solo los números de la línea (el PID)
+    $pid = ($query -replace '[^\d]', '').Trim()
+
+    if ($pid -ne "0") {
+        Write-Host "PID detectado: $pid. Procediendo a forzar el cierre..." -ForegroundColor Yellow
+        
+        # 3. Ejecutar taskkill con el PID encontrado
+        taskkill.exe /F /PID $pid
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "¡ÉXITO! El proceso $pid ha sido finalizado." -ForegroundColor Green
+        }
+    } else {
+        Write-Host "El servicio está detenido (PID es 0). No hay proceso que matar." -ForegroundColor White
+    }
+} else {
+    Write-Host "ERROR: No se pudo obtener información del servicio. ¿Está instalado?" -ForegroundColor Red
+}
+
+Read-Host "`nPresiona Enter para cerrar"
+
+
+
 ##### vlaida librerias openssl
 
 
@@ -576,6 +609,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
