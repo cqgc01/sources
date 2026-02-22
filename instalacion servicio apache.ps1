@@ -217,5 +217,60 @@ if ($checkSvc.Status -ne "Running") {
 Write-Host "`n--- Diagnostico Finalizado ---"
 
 
-[+] REVISIÓN DE RUTAS EN EL ARCHIVO CONF...
-    - # with "/", the value of ServerRoot is prepended -- so "logs/access_log"
+//////
+# 1. Configuración de rutas
+$serviceName = "HSLS14.2"
+$apacheBin = "C:\HSLS-14.2\Apache\bin"
+$apacheExe = Join-Path $apacheBin "httpd.exe"
+$confFile = Join-Path (Split-Path $apacheBin) "conf\httpd.conf"
+
+Write-Host "--- Iniciando Escaneo de Rutas Críticas ---" -ForegroundColor Cyan
+
+# 2. Extraer rutas del archivo de configuración
+if (Test-Path $confFile) {
+    Write-Host "[+] Verificando carpetas configuradas en httpd.conf" -ForegroundColor White
+    $content = Get-Content $confFile
+    
+    # Buscamos ServerRoot, DocumentRoot y Listen
+    $sRoot = ($content | Select-String "^ServerRoot\s+`"(.+?)`"" | ForEach-Object { $_.Matches.Groups[1].Value }) -replace '"', ''
+    $dRoot = ($content | Select-String "^DocumentRoot\s+`"(.+?)`"" | ForEach-Object { $_.Matches.Groups[1].Value }) -replace '"', ''
+    
+    $rutas = @{ "ServerRoot" = $sRoot; "DocumentRoot" = $dRoot }
+
+    foreach ($nombre in $rutas.Keys) {
+        $ruta = $rutas[$nombre]
+        if ($ruta) {
+            if (Test-Path $ruta) {
+                Write-Host ("    - " + $nombre + " [" + $ruta + "] - OK (Existe)") -ForegroundColor Green
+            } else {
+                Write-Host ("    - " + $nombre + " [" + $ruta + "] - ERROR (No existe o inaccesible)") -ForegroundColor Red
+            }
+        } else {
+            Write-Host ("    - " + $nombre + " - No encontrada en el .conf (Usando valor por defecto)") -ForegroundColor Yellow
+        }
+    }
+}
+
+# 3. Diagnóstico de Puertos (80/443) con Taskkill automático
+Write-Host "`n[+] Analizando y liberando puertos" -ForegroundColor White
+$puertos = @(80, 443)
+foreach ($p in $puertos) {
+    $c = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue
+    if ($c) {
+        $proc = Get-Process -Id $c.OwningProcess
+        Write-Host ("    - Puerto " + $p + " ocupado por " + $proc.ProcessName + " (PID " + $proc.Id + ")") -ForegroundColor Red
+        Write-Host "    - Intentando cerrar proceso bloqueador..." -ForegroundColor Gray
+        taskkill /F /PID $proc.Id /T 2>$null
+        Start-Sleep -Seconds 1
+    } else {
+        Write-Host ("    - Puerto " + $p + " - LIBRE") -ForegroundColor Green
+    }
+}
+
+# 4. Intento final de arranque manual para ver el error
+Write-Host "`n[+] Prueba de arranque forzado (Mira si sale algun error abajo):" -ForegroundColor Cyan
+& $apacheExe -t 2>&1 | Out-String | Write-Host -ForegroundColor Yellow
+
+Write-Host "`n--- Escaneo Finalizado ---"
+
+
