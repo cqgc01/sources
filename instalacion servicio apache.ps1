@@ -1,3 +1,19 @@
+
+
+
+
+    - ERROR: La ruta 'is prepended -- so "logs/access_log' NO existe físicamente.
+    - ERROR: La ruta 'set to "/usr/local/apache2" will be interpreted by the' NO existe físicamente.
+    - ERROR: La ruta 'at a non-local disk, be sure to specify a local disk on the' NO existe físicamente.
+    - ERROR: La ruta 'for multiple httpd daemons, you will need to change at' NO existe físicamente.
+    - ERROR: La ruta '${SRVROOT}' NO existe físicamente.
+    - ERROR: La ruta '${SRVROOT}/htdocs' NO existe físicamente.
+    - ERROR: La ruta 'directive within a <VirtualHost>' NO existe físicamente.
+    - ERROR: La ruta 'logs/error.log' NO existe físicamente.
+
+
+
+
 # ==========================================================
 #   DIAGNÓSTICO ANTIBLOQUEO: PASOS 1, 2 Y 4
 # ==========================================================
@@ -470,6 +486,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
