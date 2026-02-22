@@ -3,77 +3,98 @@ $apacheBin = "C:\HSLS-14.2\Apache\bin"
 $serviceName = "HSLS14.2"
 $maxRetries = 10
 
-Write-Host "--- Iniciando instalación y control de reintentos ---" -ForegroundColor Cyan
+Write-Host "--- Iniciando Instalación con Diagnóstico Avanzado ---" -ForegroundColor Cyan
 Set-Location $apacheBin
 
-# 2. Limpieza agresiva inicial
-Write-Host "Limpiando registros antiguos..."
+# 2. Limpieza previa
+Write-Host "[1/4] Limpiando residuos..."
 net stop $serviceName 2>$null
 ./httpd.exe -k uninstall -n $serviceName 2>$null
 
 # 3. Instalación
-Write-Host "Registrando el servicio..."
+Write-Host "[2/4] Registrando servicio..."
 ./httpd.exe -k install -n $serviceName
 
-# 4. Bucle de reintentos (Máximo 10)
-$retryCount = 1
+# 4. Bucle de reintentos
+Write-Host "[3/4] Intentando subir el servicio (Máx 10 veces)..."
 $success = $false
-
-while ($retryCount -le $maxRetries) {
-    Write-Host "Intento de inicio $retryCount de $maxRetries..." -NoNewline
-    
-    # Intentar liberar el puerto 443 antes de cada arranque
+for ($i = 1; $i -le $maxRetries; $i++) {
+    # Liberar puerto 443 antes de cada intento
     $port443 = Get-NetTCPConnection -LocalPort 443 -State Listen -ErrorAction SilentlyContinue
     if ($port443) {
-        $pidToKill = $port443.OwningProcess
-        taskkill /F /PID $pidToKill 2>$null
+        taskkill /F /PID $port443.OwningProcess 2>$null
         Start-Sleep -Seconds 1
     }
-
+    
     Start-Service -Name $serviceName -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2 # Tiempo para que el servicio intente estabilizarse
-
+    Start-Sleep -Seconds 2
+    
     if ((Get-Service $serviceName).Status -eq "Running") {
-        Write-Host " ¡LOGRADO!" -ForegroundColor Green
+        Write-Host " -> Intento $i: ¡EXITOSO!" -ForegroundColor Green
         $success = $true
         break
     } else {
-        Write-Host " Fallido." -ForegroundColor Yellow
-        $retryCount++
+        Write-Host " -> Intento $i: Fallido..." -ForegroundColor Yellow
     }
 }
 
-# 5. Diagnóstico de Causas si falló
+# 5. DIAGNÓSTICO DETALLADO (Si falló)
 if (-not $success) {
-    Write-Host "`n--- DIAGNÓSTICO DE FALLO FINAL ---" -ForegroundColor Red
-    
-    # Causa 1: Error de Sintaxis
-    Write-Host "[1] Revisando errores de configuración..." -ForegroundColor Cyan
-    $syntax = ./httpd.exe -t 2>&1
-    if ($syntax -match "Syntax error") {
-        Write-Host "CAUSA DETECTADA: Error de sintaxis en httpd.conf." -ForegroundColor Yellow
-        Write-Host "DETALLE: $syntax"
+    Write-Host "`n[4/4] INICIANDO DIAGNÓSTICO PROFUNDO..." -ForegroundColor Red
+    Write-Host "============================================="
+
+    # A. Prueba de Sintaxis (La causa #1)
+    Write-Host "`n[+] Verificando Sintaxis de Apache:" -ForegroundColor Cyan
+    $syntaxResult = ./httpd.exe -t 2>&1
+    if ($syntaxResult -match "Syntax error") {
+        Write-Host "[!] ERROR DE CONFIGURACIÓN DETECTADO:" -ForegroundColor Red
+        $syntaxResult | Out-String | Write-Host -ForegroundColor Yellow
     } else {
-        Write-Host "Sintaxis de Apache: OK."
+        Write-Host "    - Sintaxis: OK" -ForegroundColor Green
     }
 
-    # Causa 2: Puertos Ocupados (80/443)
-    Write-Host "[2] Revisando conflictos de puertos..." -ForegroundColor Cyan
-    $ports = 80, 443 | ForEach-Object { Get-NetTCPConnection -LocalPort $_ -State Listen -ErrorAction SilentlyContinue }
-    if ($ports) {
-        foreach ($p in $ports) {
-            $proc = Get-Process -Id $p.OwningProcess
-            Write-Host "CAUSA DETECTADA: Puerto $($p.LocalPort) sigue bloqueado por $($proc.ProcessName) (PID: $($proc.Id))" -ForegroundColor Yellow
+    # B. Conflicto de Puertos Críticos
+    Write-Host "`n[+] Verificando Puertos (80/443):" -ForegroundColor Cyan
+    $puertos = 80, 443
+    foreach ($p in $puertos) {
+        $con = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue
+        if ($con) {
+            $proc = Get-Process -Id $con.OwningProcess
+            Write-Host "[!] El puerto $p está ocupado por: $($proc.ProcessName) (PID: $($proc.Id))" -ForegroundColor Red
+            Write-Host "    Ruta del proceso: $($proc.Path)" -ForegroundColor Gray
+        } else {
+            Write-Host "    - Puerto $p: Libre" -ForegroundColor Green
         }
-    } else {
-        Write-Host "Puertos 80 y 443: Libres."
     }
 
-    # Causa 3: Event Viewer (Errores de Windows)
-    Write-Host "[3] Últimos errores en el Visor de Eventos:" -ForegroundColor Cyan
-    Get-WinEvent -LogName Application -MaxEvents 5 | Where-Object { $_.Message -match "Apache" -or $_.Message -match $serviceName } | Select-Object TimeCreated, Message | Format-Table -Wrap
+    # C. Verificación de Rutas y Permisos
+    Write-Host "`n[+] Verificando Permisos y Directorios:" -ForegroundColor Cyan
+    $confPath = Join-Path (Split-Path $apacheBin) "conf\httpd.conf"
+    if (Test-Path $confPath) {
+        Write-Host "    - Archivo de config existe." -ForegroundColor Green
+    } else {
+        Write-Host "[!] CRÍTICO: No se encuentra httpd.conf en $confPath" -ForegroundColor Red
+    }
+
+    # D. Análisis del Visor de Eventos (Event Viewer)
+    Write-Host "`n[+] Analizando logs del Sistema (Windows Events):" -ForegroundColor Cyan
+    $events = Get-WinEvent -FilterHashtable @{LogName='Application'; Level=2} -MaxEvents 20 | 
+              Where-Object { $_.Message -match "Apache" -or $_.Source -match "Apache" }
+    
+    if ($events) {
+        $events | Select-Object TimeCreated, Message | Format-Table -AutoSize -Wrap | Out-String | Write-Host -ForegroundColor Yellow
+    } else {
+        Write-Host "    - No se encontraron errores específicos en el log de Windows." -ForegroundColor Green
+    }
+
+    # E. Intento de ejecución manual (Para ver error en tiempo real)
+    Write-Host "`n[+] Ejecución de prueba manual (Salida directa):" -ForegroundColor Cyan
+    Write-Host "Lanzando httpd.exe sin servicio..." -ForegroundColor Gray
+    Start-Process ./httpd.exe -ArgumentList "-k start" -NoNewWindow -Wait -ErrorAction SilentlyContinue
 }
 
-Write-Host "`nProceso finalizado."
+Write-Host "`nProcedimiento finalizado."
+
+
 
 
