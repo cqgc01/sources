@@ -75,6 +75,16 @@ Write-Host "`n[5/5] Proceso finalizado."
 
 ////
 
+At line:44 char:43
++         } else { Write-Host "    - Puerto $p: Libre" -ForegroundColor ...
++                                           ~~~
+Variable reference is not valid. ':' was not followed by a valid variable name character. Consider using ${} to delimit the name.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : InvalidVariableReferenceWithDrive
+
+
+//////
+
 # 1. Configuración de variables
 $serviceName = "HSLS14.2"
 $apacheBin = "C:\HSLS-14.2\Apache\bin"
@@ -139,4 +149,5 @@ if ((Get-Service $serviceName).Status -ne "Running") {
 }
 
 Write-Host "`n--- Auditoría Finalizada ---"
+
 
