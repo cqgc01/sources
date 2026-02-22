@@ -7,20 +7,25 @@ $registryPath = "HKLM:\SYSTEM\CurrentControlSet\Services\" + $serviceName
 Write-Host "--- Iniciando Limpieza Profunda y Reinstalación de Apache ---" -ForegroundColor Cyan
 Set-Location $apacheBin
 
-# 2. BORRADO TOTAL
+# 2. BORRADO TOTAL (Reforzado)
 Write-Host "[1/5] Ejecutando limpieza de rastro previo..."
-if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
-    Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
-    & ./httpd.exe -k uninstall -n $serviceName 2>$null
-    Start-Sleep -Seconds 1
-}
-if (Test-Path $registryPath) { Remove-Item -Path $registryPath -Recurse -Force -ErrorAction SilentlyContinue }
-sc.exe delete $serviceName | Out-Null
+Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
+& ./httpd.exe -k uninstall -n $serviceName 2>$null
 
-# 3. Instalación Nueva (CORREGIDO: Evita el error rojo NativeCommandError)
+if (Test-Path $registryPath) {
+    Remove-Item -Path $registryPath -Recurse -Force -ErrorAction SilentlyContinue
+}
+sc.exe delete $serviceName | Out-Null
+Start-Sleep -Seconds 2
+
+# 3. Instalación Nueva (CON TIMEOUT PARA QUE NO SE CONGELE)
 Write-Host "[2/5] Registrando nueva instancia del servicio..."
-$null = & ./httpd.exe -k install -n $serviceName 2>&1
-Write-Host "    - Servicio registrado correctamente." -ForegroundColor Gray
+$installParams = "-k install -n " + $serviceName
+# Ejecuta en segundo plano y espera máximo 10 segundos
+$process = Start-Process -FilePath "./httpd.exe" -ArgumentList $installParams -NoNewWindow -PassThru -ErrorAction SilentlyContinue
+$process | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+
+Write-Host "    - Registro completado o tiempo de espera agotado." -ForegroundColor Gray
 
 # 4. Bucle de 10 reintentos
 Write-Host "[3/5] Intentando iniciar servicio (Max 10 intentos)..."
@@ -28,32 +33,30 @@ $success = $false
 for ($i = 1; $i -le $maxRetries; $i++) {
     $port443 = Get-NetTCPConnection -LocalPort 443 -State Listen -ErrorAction SilentlyContinue
     if ($port443) {
-        taskkill /F /PID $port443.OwningProcess 2>$null
+        $pidToKill = $port443.OwningProcess
+        Write-Host ("    - Liberando puerto 443 (PID " + $pidToKill + ")...") -ForegroundColor Gray
+        taskkill /F /PID $pidToKill 2>$null
         Start-Sleep -Seconds 1
     }
+
     Start-Service -Name $serviceName -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
-    if ((Get-Service -Name $serviceName -ErrorAction SilentlyContinue).Status -eq "Running") {
-        Write-Host (" -> ¡ÉXITO! Intento " + $i) -ForegroundColor Green
+
+    $check = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    if ($check.Status -eq "Running") {
+        Write-Host (" -> ¡EXITOSO! Intento " + $i) -ForegroundColor Green
         $success = $true ; break
     } else {
         Write-Host (" -> Fallo en intento " + $i) -ForegroundColor Yellow
     }
 }
 
-# 5. DIAGNÓSTICO SI FALLA
+# 5. DIAGNÓSTICO (Si no inició, aquí verás por qué)
 if (-not $success) {
     Write-Host "`n[4/5] --- DIAGNÓSTICO DE FALLO ---" -ForegroundColor Red
-    Write-Host "El servicio no inició. Error detectado en httpd.conf:" -ForegroundColor White
-    
-    # ESTO MOSTRARÁ EL ERROR REAL DE CONFIGURACIÓN
-    $errorConfig = & ./httpd.exe -t 2>&1
-    $errorConfig | Out-String | Write-Host -ForegroundColor Yellow
-
-    Write-Host "`nRevisando puertos:" -ForegroundColor White
-    80, 443 | ForEach-Object {
-        $c = Get-NetTCPConnection -LocalPort $_ -State Listen -ErrorAction SilentlyContinue
-        if ($c) { Write-Host ("Puerto " + $_ + " ocupado por PID " + $c.OwningProcess) -ForegroundColor Red }
-    }
+    Write-Host "Revisando errores de sintaxis en httpd.conf..."
+    $diag = & ./httpd.exe -t 2>&1
+    $diag | Out-String | Write-Host -ForegroundColor Yellow
 }
+
 Write-Host "`n[5/5] Proceso finalizado."
