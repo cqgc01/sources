@@ -216,3 +216,6 @@ if ($checkSvc.Status -ne "Running") {
 
 Write-Host "`n--- Diagnostico Finalizado ---"
 
+
+[+] REVISIÓN DE RUTAS EN EL ARCHIVO CONF...
+    - # with "/", the value of ServerRoot is prepended -- so "logs/access_log"
