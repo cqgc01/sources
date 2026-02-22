@@ -85,7 +85,7 @@ $apacheExe = Join-Path $apacheBin "httpd.exe"
 
 Write-Host "--- Iniciando Monitor de Servicio Apache ---" -ForegroundColor Cyan
 
-# 2. Intento de arranque
+# 2. Intento de arranque con tiempo límite (Timeout)
 $svc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if (-not $svc) {
     Write-Host "[!] El servicio " + $serviceName + " no esta registrado." -ForegroundColor Red
@@ -93,84 +93,53 @@ if (-not $svc) {
 }
 
 if ($svc.Status -ne "Running") {
-    Write-Host "Arrancando servicio..."
+    Write-Host "Arrancando servicio (espera maxima 5 seg)..."
+    # Iniciamos el servicio sin esperar a que Windows termine de confirmarlo (que es donde se cuelga)
     Start-Service -Name $serviceName -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 3
+    Start-Sleep -Seconds 5
 }
 
-# 3. Validación y Búsqueda Profunda si falló
+# 3. Validación Final y Búsqueda de la Causa
 $checkSvc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if ($checkSvc.Status -ne "Running") {
-    Write-Host "`n[FALLO] No se pudo iniciar. Iniciando busqueda profunda..." -ForegroundColor Red
+    Write-Host "`n[FALLO] El servicio no pudo estabilizarse." -ForegroundColor Red
     Write-Host "==============================================================="
 
-    # CAUSA A: Error de Sintaxis (httpd -t)
-    Write-Host "[+] ANALIZANDO SINTAXIS DEL ARCHIVO CONF" -ForegroundColor Cyan
+    # CAUSA A: Error de Sintaxis (ESTO ES LO MÁS PROBABLE)
+    Write-Host "[+] ANALIZANDO SINTAXIS EN EL ARCHIVO CONF" -ForegroundColor Cyan
     if (Test-Path $apacheExe) {
+        # Ejecutamos el test de sintaxis y capturamos TODO el error
         $syntax = & $apacheExe -t 2>&1
-        if ($syntax -match "Syntax error") {
-            Write-Host "[!] ERROR DE SINTAXIS DETECTADO" -ForegroundColor Yellow
-            $syntax | Out-String | Write-Host
+        $syntaxStr = $syntax | Out-String
+        if ($syntaxStr -match "error" -or $syntaxStr -match "failed") {
+            Write-Host "[!] ERROR DE CONFIGURACION ENCONTRADO" -ForegroundColor Yellow
+            Write-Host $syntaxStr
         } else { 
             Write-Host "    - Sintaxis - OK" -ForegroundColor Green 
         }
     }
 
-    # CAUSA B: Conflictos de Puertos (80/443)
-    Write-Host "`n[+] ANALIZANDO CONFLICTOS DE RED (PUERTOS)" -ForegroundColor Cyan
-    $puertos = @(80, 443)
-    foreach ($p in $puertos) {
+    # CAUSA B: Puertos bloqueados
+    Write-Host "`n[+] ANALIZANDO PUERTOS (80/443)" -ForegroundColor Cyan
+    $testPorts = @(80, 443)
+    foreach ($p in $testPorts) {
         $conn = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue
         if ($conn) {
             $proc = Get-Process -Id $conn.OwningProcess
-            Write-Host ("[! - Puerto " + $p + " bloqueado por - " + $proc.ProcessName + " (PID - " + $proc.Id + ")") -ForegroundColor Red
+            Write-Host ("    - Puerto " + $p + " bloqueado por - " + $proc.ProcessName + " (PID - " + $proc.Id + ")") -ForegroundColor Red
         } else { 
             Write-Host ("    - Puerto " + $p + " - Libre") -ForegroundColor Green 
         }
     }
 
-    # CAUSA C: Logs del Sistema (Visor de Eventos)
-    Write-Host "`n[+] BUSCANDO ERRORES EN EVENT VIEWER (Ultimos 5 min)" -ForegroundColor Cyan
-    $timeLimit = (Get-Date).AddMinutes(-5)
-    $events = Get-WinEvent -FilterHashtable @{LogName='Application'; Level=2; StartTime=$timeLimit} -ErrorAction SilentlyContinue | 
-              Where-Object { $_.Message -match "Apache" -or $_.Source -match "Apache" }
-    if ($events) {
-        $events | Select-Object TimeCreated, Message | Format-Table -AutoSize -Wrap
-    } else { 
-        Write-Host "    - No hay eventos recientes de Apache." -ForegroundColor Green 
-    }
+    # CAUSA C: Ejecución Manual para ver el error "en vivo"
+    Write-Host "`n[+] PRUEBA DE ARRANQUE MANUAL (Salida directa de Apache)" -ForegroundColor Cyan
+    Write-Host "Ejecutando httpd.exe directamente..." -ForegroundColor Gray
+    # Lanzamos apache directamente para ver si escupe algun error en consola
+    & $apacheExe -e info -t | Out-String | Write-Host -ForegroundColor Yellow
 
-    # CAUSA D: Permisos de Carpeta
-    Write-Host "`n[+] VERIFICANDO PERMISOS DE ACCESO" -ForegroundColor Cyan
-    $acl = Get-Acl (Split-Path $apacheBin)
-    Write-Host ("    - Propietario actual - " + $acl.Owner)
 } else {
     Write-Host "EXITO - El servicio esta en ejecucion." -ForegroundColor Green
 }
 
 Write-Host "`n--- Auditoria Finalizada ---"
-
-
-
-    # CAUSA D: Permisos de Carpeta
-    Write-Host "`n[+] VERIFICANDO PERMISOS DE ACCESO" -ForegroundColor Cyan
-    $acl = Get-Acl (Split-Path $apacheBin)
-    Write-Host ("    - Propietario actual - " + $acl.Owner)
-} else {
-    Write-Host "EXITO - El servicio esta en ejecucion." -ForegroundColor Green
-}
-
-Write-Host "`n--- Auditoria Finalizada ---"
---- Iniciando Monitor de Servicio Apache ---
-Arrancando servicio...
-WARNING: Waiting for service 'HSLS14.2 (HSLS14.2)' to start...
-WARNING: Waiting for service 'HSLS14.2 (HSLS14.2)' to start...
-WARNING: Waiting for service 'HSLS14.2 (HSLS14.2)' to start...
-WARNING: Waiting for service 'HSLS14.2 (HSLS14.2)' to start...
-WARNING: Waiting for service 'HSLS14.2 (HSLS14.2)' to start...
-WARNING: Waiting for service 'HSLS14.2 (HSLS14.2)' to start...
-WARNING: Waiting for service 'HSLS14.2 (HSLS14.2)' to start...
-WARNING: Waiting for service 'HSLS14.2 (HSLS14.2)' to start...
-WARNING: Waiting for service 'HSLS14.2 (HSLS14.2)' to start...
-WARNING: Waiting for service 'HSLS14.2 (HSLS14.2)' to start...
-
