@@ -1,3 +1,38 @@
+
+Id     Name            PSJobTypeName   State         HasMoreData     Location             Command                  
+--     ----            -------------   -----         -----------     --------             -------                  
+11     PowerShell.E...                 NotStarted    False                                ...                      
+Transcript started, output file is C:\HSLS-14.2\Logs\Powershell\ApacheRecovery_20260222_123725.log
+Add-Content : The process cannot access the file 'C:\HSLS-14.2\Logs\Powershell\ApacheRecovery_20260222_123725.log' because it is being used by another process.
+At line:33 char:5
++     Add-Content -Path $logFile -Value $line
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (C:\HSLS-14.2\Lo...0222_123725.log:String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Commands.AddContentCommand
+ 
+Add-Content : The process cannot access the file 'C:\HSLS-14.2\Logs\Powershell\ApacheRecovery_20260222_123725.log' because it is being used by another process.
+At line:33 char:5
++     Add-Content -Path $logFile -Value $line
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (C:\HSLS-14.2\Lo...0222_123725.log:String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Commands.AddContentCommand
+ 
+SUCCESS: The process with PID 24432 (child process of PID 16504) has been terminated.
+Add-Content : The process cannot access the file 'C:\HSLS-14.2\Logs\Powershell\ApacheRecovery_20260222_123725.log' because it is being used by another process.
+At line:33 char:5
++     Add-Content -Path $logFile -Value $line
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (C:\HSLS-14.2\Lo...0222_123725.log:String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Commands.AddContentCommand
+ 
+Add-Content : The process cannot access the file 'C:\HSLS-14.2\Logs\Powershell\ApacheRecovery_20260222_123725.log' because it is being used by another process.
+At line:33 char:5
++     Add-Content -Path $logFile -Value $line
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (C:\HSLS-14.2\Lo...0222_123725.log:String) [Add-Content], IOException
+    + FullyQualifiedErrorId : GetContentWriterIOError,Microsoft.PowerShell.Commands.AddContentCommand
+
+
 # ==========================================================
 #   APACHE REINSTALL + SISTEMA DE LOG DE RECUPERACIÓN
 # ==========================================================
@@ -154,3 +189,4 @@ finally {
     Write-Log "Cierre del script"
     Stop-Transcript
 }
+
