@@ -1,3 +1,74 @@
+##### vlaida librerias openssl
+
+
+# ==========================================================
+#   AUDITORÍA DE INTEGRIDAD: OPENSSL & DLLs CRÍTICAS
+# ==========================================================
+
+$apacheBin = "C:\HSLS-14.2\Apache\bin"
+$dlls = @("libssl-3-x64.dll", "libcrypto-3-x64.dll", "libssl.dll", "libcrypto.dll")
+
+Write-Host "--- Iniciando Auditoría de Librerías OpenSSL ---" -ForegroundColor Cyan
+
+foreach ($dllName in $dlls) {
+    $dllPath = Join-Path $apacheBin $dllName
+    Write-Host "`n[+] Analizando: $dllName" -ForegroundColor White
+
+    if (!(Test-Path $dllPath)) {
+        Write-Host "    - AVISO: El archivo no existe con este nombre (puede ser normal según la versión)." -ForegroundColor Gray
+        continue
+    }
+
+    # 1. VERIFICAR BLOQUEO DEL SISTEMA (Atributos)
+    $fileInfo = Get-Item $dllPath -Stream *
+    if ($fileInfo | Where-Object { $_.Stream -match "Zone.Identifier" }) {
+        Write-Host "    - CRÍTICO: La DLL está BLOQUEADA por Windows (descargada de internet)." -ForegroundColor Red
+        Write-Host "    - ACCIÓN: Ejecutando Unblock-File..." -ForegroundColor Yellow
+        Unblock-File $dllPath
+    } else {
+        Write-Host "    - Bloqueo de zona: OK (Desbloqueada)" -ForegroundColor Green
+    }
+
+    # 2. VERIFICAR ARQUITECTURA (¿Es realmente 64-bit?)
+    $bytes = [System.IO.File]::ReadAllBytes($dllPath)
+    # Buscamos la firma PE (Portable Executable)
+    $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+    $machineType = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+    
+    if ($machineType -eq 0x8664) {
+        Write-Host "    - Arquitectura: OK (64-bit)" -ForegroundColor Green
+    } else {
+        Write-Host "    - ERROR: La DLL NO es de 64-bit. Apache Win64 fallará al cargarla." -ForegroundColor Red
+    }
+
+    # 3. VERIFICAR CORRUPCIÓN (Firma Digital)
+    $signature = Get-AuthenticodeSignature $dllPath
+    if ($signature.Status -eq "Valid") {
+        Write-Host "    - Firma Digital: VÁLIDA (Integridad confirmada)" -ForegroundColor Green
+    } elseif ($signature.Status -eq "NotSigned") {
+        Write-Host "    - Firma Digital: No firmada (Común en versiones personalizadas, no implica corrupción)" -ForegroundColor Yellow
+    } else {
+        Write-Host "    - ERROR: Firma corrupta o alterada: $($signature.Status)" -ForegroundColor Red
+    }
+
+    # 4. PRUEBA DE CARGA EN MEMORIA (Detecta bloqueos de Antivirus)
+    try {
+        $testLoad = [System.Reflection.Assembly]::LoadFile($dllPath)
+        Write-Host "    - Carga en memoria: EXITOSA" -ForegroundColor Green
+    } catch {
+        if ($_.Exception.Message -match "bloqueado" -or $_.Exception.InnerException -match "bloqueado") {
+            Write-Host "    - ERROR: El acceso al archivo está BLOQUEADO por un proceso externo (Antivirus/EDR)." -ForegroundColor Red
+        } else {
+            # Catch normal para DLLs nativas que no son ensamblados .NET (es esperado)
+            Write-Host "    - Acceso al archivo: OK (Sin bloqueos de lectura)" -ForegroundColor Green
+        }
+    }
+}
+
+Write-Host "`n--- Auditoría Finalizada ---"
+
+
+
 # si el error es antiviros o rutas
 
 # 1. Configuración
@@ -505,6 +576,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
