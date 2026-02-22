@@ -1,162 +1,11 @@
-# ==========================================================
-# APACHE ENTERPRISE SERVICE RECOVERY SCRIPT
-# ==========================================================
-
-$ErrorActionPreference = "Stop"
-
-# ==============================
-# CONFIGURACION
-# ==============================
-
-$ApacheServiceName = "HSLS14.2"
-$ApacheBinPath     = "C:\HSLS-14.2\Apache\bin"
-$LogRoot           = "C:\HSLS-14.2\Logs\Powershell"
-
-# ==============================
-# CREAR CARPETA LOG
-# ==============================
-
-if (!(Test-Path $LogRoot)) {
-    New-Item -ItemType Directory -Path $LogRoot -Force | Out-Null
-}
-
-$LogFile = Join-Path $LogRoot "ApacheRecovery_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
-
-# ==============================
-# FUNCION LOG
-# ==============================
-
-function Write-Log {
-    param(
-        [string]$Message,
-        [string]$Level = "INFO"
-    )
-
-    $Time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $Line = "$Time [$Level] $Message"
-    Add-Content -Path $LogFile -Value $Line
-}
-
-# Detectar cierre inesperado
-Register-EngineEvent PowerShell.Exiting -Action {
-    Add-Content -Path $LogFile -Value "$(Get-Date) [WARNING] PowerShell terminó."
-} | Out-Null
-
-Write-Log "==== INICIO SCRIPT RECOVERY ===="
-
-# ==============================
-# VALIDAR PUERTOS
-# ==============================
-
-function Test-Port {
-    param($Port)
-
-    $result = netstat -ano | findstr ":$Port"
-
-    if ($result) {
-        Write-Log "Puerto $Port ocupado" "WARNING"
-        return $false
-    }
-    else {
-        Write-Log "Puerto $Port libre"
-        return $true
-    }
-}
-
-Test-Port 80
-Test-Port 443
-
-# ==============================
-# VALIDAR SINTAXIS APACHE
-# ==============================
-
-Write-Log "Validando configuración Apache"
-
-$syntaxTest = & "$ApacheBinPath\httpd.exe" -t 2>&1
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Log "Error en httpd.conf: $syntaxTest" "ERROR"
-    exit 1
-}
-else {
-    Write-Log "Sintaxis Apache OK"
-}
-
-# ==============================
-# AMPLIAR TIMEOUT WINDOWS
-# ==============================
-
-Write-Log "Verificando ServicesPipeTimeout"
-
-$timeout = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control" -Name ServicesPipeTimeout -ErrorAction SilentlyContinue
-
-if (!$timeout) {
-    New-ItemProperty `
-        -Path "HKLM:\SYSTEM\CurrentControlSet\Control" `
-        -Name ServicesPipeTimeout `
-        -Value 180000 `
-        -PropertyType DWord `
-        -Force | Out-Null
-
-    Write-Log "Timeout ampliado a 180000 ms"
-}
-else {
-    Write-Log "Timeout ya configurado"
-}
-
-# ==============================
-# INTENTAR INICIAR SERVICIO
-# ==============================
-
-try {
-
-    Write-Log "Intentando iniciar servicio $ApacheServiceName"
-
-    Start-Service -Name $ApacheServiceName -ErrorAction Stop
-    Start-Sleep -Seconds 5
-
-    $status = Get-Service -Name $ApacheServiceName
-
-    if ($status.Status -eq "Running") {
-        Write-Log "Servicio iniciado correctamente"
-    }
-    else {
-        Write-Log "Servicio no inició correctamente" "ERROR"
-        throw "Servicio detenido después de intento"
-    }
-}
-catch {
-
-    Write-Log "Error iniciando servicio: $($_.Exception.Message)" "ERROR"
-
-    Write-Log "Intentando recuperación automática"
-
-    # Matar procesos httpd colgados
-    Get-Process httpd -ErrorAction SilentlyContinue | ForEach-Object {
-        Write-Log "Terminando proceso httpd PID $($_.Id)"
-        Stop-Process -Id $_.Id -Force
-    }
-
-    Start-Sleep -Seconds 3
-
-    try {
-        Start-Service -Name $ApacheServiceName
-        Write-Log "Servicio iniciado después de recuperación"
-    }
-    catch {
-        Write-Log "Falla crítica: no se pudo iniciar servicio" "CRITICAL"
-
-        Write-EventLog -LogName Application `
-            -Source "PowerShell" `
-            -EntryType Error `
-            -EventId 5001 `
-            -Message "Apache no pudo iniciar - revisar logs"
-
-        exit 1
-    }
-}
-
-Write-Log "==== FIN SCRIPT ===="
+    - Servicio registrado.
+[3/5] Intentando iniciar servicio...
+Cannot overwrite variable PID because it is read-only or constant.
+At line:53 char:9
++         $pid = $connection.OwningProcess
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (PID:String) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : VariableNotWritable
 
 
 
@@ -319,5 +168,6 @@ finally {
     Write-Log "Cierre del script"
     Stop-Transcript
 }
+
 
 
