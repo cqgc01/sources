@@ -85,3 +85,16 @@ if (-not $success) {
 }
 
 Write-Host "`n[5/5] Proceso finalizado."
+
+
+[2/5] Registrando nueva instancia del servicio...
+httpd.exe : Installing the 'HSLS14.2' service
+At line:32 char:1
++ & ./httpd.exe -k install -n $serviceName
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Installing the 'HSLS14.2' service:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+The 'HSLS14.2' service is successfully installed.
+Testing httpd.conf....
+Errors reported here must be corrected before the service can be started.
