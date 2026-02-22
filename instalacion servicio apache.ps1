@@ -1,21 +1,5 @@
-
-
-
-
-    - ERROR: La ruta 'is prepended -- so "logs/access_log' NO existe físicamente.
-    - ERROR: La ruta 'set to "/usr/local/apache2" will be interpreted by the' NO existe físicamente.
-    - ERROR: La ruta 'at a non-local disk, be sure to specify a local disk on the' NO existe físicamente.
-    - ERROR: La ruta 'for multiple httpd daemons, you will need to change at' NO existe físicamente.
-    - ERROR: La ruta '${SRVROOT}' NO existe físicamente.
-    - ERROR: La ruta '${SRVROOT}/htdocs' NO existe físicamente.
-    - ERROR: La ruta 'directive within a <VirtualHost>' NO existe físicamente.
-    - ERROR: La ruta 'logs/error.log' NO existe físicamente.
-
-
-
-
 # ==========================================================
-#   DIAGNÓSTICO ANTIBLOQUEO: PASOS 1, 2 Y 4
+#   DIAGNÓSTICO ANTIBLOQUEO CORREGIDO (PASOS 1, 2 Y 4)
 # ==========================================================
 
 $serviceName = "HSLS14.2"
@@ -23,78 +7,71 @@ $apacheBin   = "C:\HSLS-14.2\Apache\bin"
 $apacheExe   = Join-Path $apacheBin "httpd.exe"
 $confFile    = "C:\HSLS-14.2\Apache\conf\httpd.conf"
 
-Write-Host "--- Iniciando Validación de Bloqueos de Carga ---" -ForegroundColor Cyan
+Write-Host "--- Iniciando Validación de Bloqueos de Carga (Filtrado) ---" -ForegroundColor Cyan
 
-# --- PASO 1: VALIDACIÓN DE DNS (ServerName) ---
+# --- PASO 1: VALIDACIÓN DE DNS ---
 Write-Host "`n[1/3] Verificando Resolución de ServerName..." -ForegroundColor White
 if (Test-Path $confFile) {
-    $snLine = Get-Content $confFile | Select-String "^ServerName\s+(.+)" | Select-Object -First 1
+    # Buscamos solo líneas que NO empiecen con #
+    $snLine = Get-Content $confFile | Where-Object { $_ -match "^ServerName" } | Select-Object -First 1
     if ($snLine) {
-        $hostName = ($snLine.Matches.Groups[1].Value).Split(':')[0].Trim()
-        Write-Host "    - Nombre detectado: $hostName" -ForegroundColor Gray
+        $hostName = ($snLine -replace "ServerName\s+", "").Split(':')[0].Trim()
         try {
             $ip = [System.Net.Dns]::GetHostEntry($hostName)
-            Write-Host "    - OK: $hostName resuelve a $($ip.AddressList[0])" -ForegroundColor Green
+            Write-Host "    - OK: $hostName resuelve correctamente." -ForegroundColor Green
         } catch {
-            Write-Host "    - ERROR: El nombre '$hostName' NO resuelve. Apache se colgará aquí." -ForegroundColor Red
-            Write-Host "    - Solución: Agregue '127.0.0.1 $hostName' en C:\Windows\System32\drivers\etc\hosts" -ForegroundColor Yellow
+            Write-Host "    - ERROR: El nombre '$hostName' NO resuelve." -ForegroundColor Red
         }
-    } else {
-        Write-Host "    - Aviso: No se encontró ServerName explícito. Apache usará el nombre del PC." -ForegroundColor Yellow
     }
 }
 
-# --- PASO 2: VALIDACIÓN DE RUTAS (Locales vs Red/UNC) ---
-Write-Host "`n[2/3] Verificando Rutas de Configuración..." -ForegroundColor White
+# --- PASO 2: VALIDACIÓN DE RUTAS (LIMPIO DE COMENTARIOS) ---
+Write-Host "`n[2/3] Verificando Rutas de Configuración Reales..." -ForegroundColor White
 if (Test-Path $confFile) {
     $content = Get-Content $confFile
-    $paths = $content | Select-String -Pattern '(ServerRoot|DocumentRoot|ErrorLog)\s+"?(.+?)"?$'
-    foreach ($line in $paths) {
-        $pathVal = ($line.Matches.Groups[2].Value).Trim('"').Trim()
+    
+    # 1. Definir SRVROOT (Suele estar al inicio del archivo)
+    $srvRootDef = $content | Where-Object { $_ -match '^Define\s+SRVROOT\s+"(.+?)"' } | Select-Object -First 1
+    if ($srvRootDef -match '"(.+?)"') { $SRVROOT_VAL = $matches[1] } 
+    else { $SRVROOT_VAL = "C:/HSLS-14.2/Apache" } # Valor por defecto si no lo encuentra
+
+    # 2. Filtrar solo directivas activas que definen rutas
+    $directives = $content | Where-Object { $_ -match "^(ServerRoot|DocumentRoot|ErrorLog|CustomLog)\s+" }
+
+    foreach ($line in $directives) {
+        # Extraer el valor quitando la directiva y las comillas
+        $rawPath = ($line -split '\s+', 2)[1].Trim().Trim('"')
         
-        # Detectar rutas de red UNC (Causa común de colgado)
-        if ($pathVal -like "\\*") {
-            Write-Host "    - CRÍTICO: Se detectó ruta de RED ($pathVal). Esto causa bloqueos si no hay acceso." -ForegroundColor Red
-        } elseif (!(Test-Path $pathVal -ErrorAction SilentlyContinue)) {
-            Write-Host "    - ERROR: La ruta '$pathVal' NO existe físicamente." -ForegroundColor Red
+        # Resolver la variable ${SRVROOT} si existe
+        $finalPath = $rawPath -replace '\$\{SRVROOT\}', $SRVROOT_VAL
+        
+        # Si es una ruta relativa (ej: logs/error.log), unirla al ServerRoot
+        if ($finalPath -notmatch "^[a-zA-Z]:" -and $finalPath -notmatch "^//") {
+            $finalPath = Join-Path $SRVROOT_VAL $finalPath
+        }
+
+        if (!(Test-Path $finalPath -ErrorAction SilentlyContinue)) {
+            Write-Host "    - ERROR: La ruta activa '$finalPath' NO existe." -ForegroundColor Red
         } else {
-            Write-Host "    - OK: Ruta válida ($pathVal)" -ForegroundColor Green
+            Write-Host "    - OK: Ruta válida ($finalPath)" -ForegroundColor Green
         }
     }
 }
 
-# --- PASO 4: PRUEBA DE CARGA DE BINARIO Y MÓDULOS (Con Timeout) ---
+# --- PASO 4: PRUEBA DE CARGA (CON TIMEOUT) ---
 Write-Host "`n[3/3] Probando Carga de Módulos (httpd -M)..." -ForegroundColor White
-$timeoutSeconds = 10
-$code = { param($exe) & $exe -M 2>&1 }
-$job = Start-Job -ScriptBlock $code -ArgumentList $apacheExe
-
-if (Wait-Job $job -Timeout $timeoutSeconds) {
-    $result = Receive-Job $job | Out-String
-    if ($result -match "error" -or $result -match "failed") {
-        Write-Host "    - Error detectado en la carga de módulos:" -ForegroundColor Yellow
-        $result | Write-Host
-    } else {
-        Write-Host "    - Carga de módulos completada exitosamente." -ForegroundColor Green
-    }
+$job = Start-Job -ScriptBlock { param($exe) & $exe -M 2>&1 } -ArgumentList $apacheExe
+if (Wait-Job $job -Timeout 10) {
+    $res = Receive-Job $job | Out-String
+    if ($res -match "error") { Write-Host "    - Error en carga de módulos." -ForegroundColor Yellow }
+    else { Write-Host "    - Carga de módulos OK." -ForegroundColor Green }
 } else {
-    Write-Host "    - CRÍTICO: El binario SE CONGELÓ tras $timeoutSeconds segundos." -ForegroundColor Red
-    Write-Log "CAUSA: El proceso no responde. Revise Antivirus o dependencias de red."
+    Write-Host "    - CRÍTICO: El binario SE CONGELÓ tras 10 segundos." -ForegroundColor Red
     Stop-Job $job
-}
-
-# --- RESUMEN DE DEPENDENCIAS VC++ (Paso 4.5) ---
-Write-Host "`n[EXTR] Verificando librerías base (MSVCP140)..." -ForegroundColor White
-$dllPath = "C:\Windows\System32\msvcp140.dll"
-if (Test-Path $dllPath) {
-    Write-Host "    - Librería VC++ detectada (System32)." -ForegroundColor Green
-} else {
-    Write-Host "    - ERROR: Falta msvcp140.dll. Instale Visual C++ 2015-2022 x64." -ForegroundColor Red
+    taskkill /F /IM httpd.exe /T 2>$null
 }
 
 Write-Host "`n--- Diagnóstico Finalizado ---"
-
-
 
 
 
@@ -486,6 +463,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
