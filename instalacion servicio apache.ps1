@@ -1,94 +1,92 @@
 ##### nueva version
 # ==========================================================
-#   APACHE REINSTALL - VERSIÓN SILENCIOSA Y SIN BLOQUEOS
+#   APACHE FORENSIC & RECOVERY SCRIPT
 # ==========================================================
 
 $serviceName  = "HSLS14.2"
 $apacheBin    = "C:\HSLS-14.2\Apache\bin"
 $apacheExe    = Join-Path $apacheBin "httpd.exe"
-$confFile     = "C:\HSLS-14.2\Apache\conf\httpd.conf"
-$logFile      = "C:\HSLS-14.2\Logs\ApacheRecovery_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
-$global:CurrentStep = "Inicializando"
+$apacheRoot   = Split-Path $apacheBin
+$confFile     = Join-Path $apacheRoot "conf\httpd.conf"
+$reportFile   = "C:\HSLS-14.2\Logs\Reporte_Fallo_$(Get-Date -Format 'HHmmss').txt"
 
-function Write-Log {
-    param ($message)
-    $line = "[$(Get-Date -Format 'HH:mm:ss')] [$global:CurrentStep] $message"
-    Write-Host $line -ForegroundColor Cyan
-    if (!(Test-Path (Split-Path $logFile))) { New-Item -Path (Split-Path $logFile) -ItemType Directory -Force | Out-Null }
-    Add-Content -Path $logFile -Value $line
+function Write-Report {
+    param ([string]$section, [string]$content)
+    $divider = "=" * 60
+    $data = "`r`n$divider`r`n$section`r`n$divider`r`n$content`r`n"
+    Add-Content -Path $reportFile -Value $data
+    Write-Host "Analizando: $section..." -ForegroundColor Cyan
 }
 
-# 1. LIMPIEZA SILENCIOSA
-function Clear-Deep {
-    $global:CurrentStep = "Limpieza"
-    Write-Log "Limpiando procesos y servicios previos..."
-    
-    # Detenemos IIS/HTTP para liberar puertos 80/443
-    & cmd.exe /c "net stop http /y" 2>$null
-    
-    # Matamos httpd.exe silenciosamente (evita el NativeCommandError)
-    Stop-Process -Name "httpd" -Force -ErrorAction SilentlyContinue
-    
-    # Borramos servicio
-    Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
-    & sc.exe delete $serviceName 2>$null | Out-Null
-    Start-Sleep -Seconds 2
+# --- INICIO DEL PROCESO ---
+Write-Host "--- Iniciando Diagnóstico Profundo ---" -ForegroundColor White
+if (!(Test-Path (Split-Path $reportFile))) { New-Item -ItemType Directory -Path (Split-Path $reportFile) -Force }
+$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+Set-Content -Path $reportFile -Value "REPORTE DE FALLO APACHE - $timestamp`r`n"
+
+# 1. PRUEBA DE SINTAXIS (La razón #1 de fallo)
+$syntax = & $apacheExe -t 2>&1 | Out-String
+if ($syntax -match "error" -or $syntax -match "failed") {
+    Write-Report "ERROR DE SINTAXIS DETECTADO" $syntax
+} else {
+    Write-Report "SINTAXIS" "Sintaxis OK. El problema no es el archivo de configuracion."
 }
 
-# 2. AUTO-CORRECCIÓN DE SERVERNAME (Evita que se quede pegado)
-function Fix-ServerName {
-    $global:CurrentStep = "Configuracion"
-    if (Test-Path $confFile) {
-        Write-Log "Ajustando ServerName a localhost para evitar bloqueos de DNS..."
-        $content = Get-Content $confFile
-        # Reemplaza cualquier linea de ServerName por localhost
-        $newContent = $content -replace '^#?ServerName\s+.*', 'ServerName localhost:80'
-        Set-Content -Path $confFile -Value $newContent -Encoding UTF8
+# 2. PRUEBA DE PUERTOS (La razón #2 de fallo)
+$portReport = ""
+foreach ($port in @(80, 443)) {
+    $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+    if ($conn) {
+        $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+        $portReport += "Puerto $port OCUPADO por: $($proc.ProcessName) (PID: $($proc.Id))`r`n"
+    } else {
+        $portReport += "Puerto $port LIBRE.`r`n"
+    }
+}
+Write-Report "ESTADO DE PUERTOS" $portReport
+
+# 3. PRUEBA DE EJECUCIÓN MANUAL (Captura el error que el servicio oculta)
+Write-Host "Ejecutando prueba de arranque manual (5 segundos)..." -ForegroundColor Yellow
+$manualProc = Start-Process $apacheExe -ArgumentList "-e info" -NoNewWindow -PassThru -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 5
+if ($manualProc) {
+    if ($manualProc.HasExited) {
+        $exitCode = $manualProc.ExitCode
+        Write-Report "FALLO DE ARRANQUE MANUAL" "Apache se cerro inmediatamente despues de abrirse. Codigo de salida: $exitCode. Esto indica falta de DLLs o carpetas inexistentes."
+    } else {
+        Write-Report "ARRANQUE MANUAL" "Apache si pudo arrancar manualmente. El problema es el usuario o permisos del Servicio de Windows."
+        Stop-Process -Id $manualProc.Id -Force
     }
 }
 
-# 3. REINSTALACIÓN Y ARRANQUE
-function Install-And-Start {
-    $global:CurrentStep = "Reinstalacion"
-    Write-Log "Registrando servicio Apache..."
-    Set-Location $apacheBin
-    
-    # Instalación
-    $null = & .\httpd.exe -k install -n $serviceName 2>&1
-    
-    $global:CurrentStep = "Arranque"
-    for ($i = 1; $i -le 5; $i++) {
-        Write-Log "Intento de inicio $i de 5..."
-        Start-Process "sc.exe" -ArgumentList "start", $serviceName -WindowStyle Hidden -Wait
-        Start-Sleep -Seconds 4
-        
-        $status = (Get-Service $serviceName -ErrorAction SilentlyContinue).Status
-        if ($status -eq "Running") {
-            Write-Log "¡EXITO! Apache funcionando correctamente."
-            return $true
-        }
-    }
-    return $false
+# 4. LOGS DE WINDOWS (Event Viewer)
+$events = Get-WinEvent -FilterHashtable @{LogName='Application'; Level=2} -MaxEvents 10 -ErrorAction SilentlyContinue | 
+          Where-Object { $_.Message -match "Apache" -or $_.Source -match "Apache" }
+if ($events) {
+    $eventData = $events | Select-Object TimeCreated, Message | Format-List | Out-String
+    Write-Report "ERRORES EN VISOR DE EVENTOS" $eventData
 }
 
-# --- EJECUCIÓN ---
-try {
-    Write-Log "=== INICIANDO PROCESO ANTIBLOQUEO ==="
-    Clear-Deep
-    Fix-ServerName
+# 5. VALIDACIÓN DE RUTAS FÍSICAS
+$confContent = Get-Content $confFile
+$paths = $confContent | Select-String -Pattern '(ServerRoot|DocumentRoot|ErrorLog)\s+"?(.+?)"?$'
+$pathReport = ""
+foreach ($line in $paths) {
+    $cleanPath = ($line.Matches.Groups[2].Value).Trim('"').Trim()
+    if ($cleanPath -notmatch "^[a-zA-Z]:") { # Si es ruta relativa, unirla al root
+        $fullPath = Join-Path $apacheRoot $cleanPath
+    } else { $fullPath = $cleanPath }
     
-    if (-not (Install-And-Start)) {
-        $global:CurrentStep = "Diagnostico"
-        Write-Log "Fallo el arranque. Analizando sintaxis..."
-        # Prueba de sintaxis rápida
-        $diag = & .\httpd.exe -t 2>&1 | Out-String
-        Write-Log "Resultado: $diag"
+    if (!(Test-Path $fullPath)) {
+        $pathReport += "RUTA INVALIDA: $fullPath (Definida en $($line.Line))`r`n"
     }
-} catch {
-    Write-Log "ERROR: $($_.Exception.Message)"
-} finally {
-    Write-Log "=== PROCESO FINALIZADO ==="
 }
+if ($pathReport) { Write-Report "RUTAS INEXISTENTES" $pathReport }
+
+# --- RESULTADO FINAL ---
+Write-Host "`n--- DIAGNÓSTICO FINALIZADO ---" -ForegroundColor Green
+Write-Host "Se ha generado un reporte detallado en: $reportFile" -ForegroundColor Yellow
+Write-Host "Por favor, abre ese archivo para ver la CAUSA EXACTA del error." -ForegroundColor Cyan
 
 
 
@@ -294,6 +292,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
