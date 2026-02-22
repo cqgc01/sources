@@ -1,11 +1,44 @@
+# si el error es antiviros o rutas
+
+# 1. Configuración
+$apacheRoot = "C:\HSLS-14.2\Apache"
+$confFile   = "$apacheRoot\conf\httpd.conf"
+
+Write-Host "--- Aplicando Correcciones de Desbloqueo ---" -ForegroundColor Cyan
+
+# A. FORZAR SERVERNAME (Evita el cuelgue por DNS)
+if (Test-Path $confFile) {
+    Write-Host "[1/3] Configurando ServerName local..." -ForegroundColor White
+    $content = Get-Content $confFile
+    # Buscamos la linea activa de ServerName y la cambiamos por IP fija
+    $newContent = $content -replace '^ServerName\s+.*', 'ServerName 127.0.0.1:80'
+    Set-Content -Path $confFile -Value $newContent -Encoding UTF8
+    Write-Host "    - OK: ServerName configurado como 127.0.0.1" -ForegroundColor Green
+}
+
+# B. PERMISOS DE CARPETA (Windows Server 2022 es muy estricto)
+Write-Host "[2/3] Ajustando permisos de seguridad..." -ForegroundColor White
+$acl = Get-Acl $apacheRoot
+# Dar control total al SYSTEM y Administradores para asegurar carga de DLLs
+$rule = New-Object System.Security.AccessControl.FileSystemAccessRule("SYSTEM","FullControl","ContainerInherit,ObjectInherit","None","Allow")
+$acl.SetAccessRule($rule)
+Set-Acl $apacheRoot $acl
+Write-Host "    - OK: Permisos de SYSTEM aplicados." -ForegroundColor Green
+
+# C. LIMPIEZA DE LOGS (Evita bloqueos de lectura/escritura)
+Write-Host "[3/3] Limpiando archivos de log antiguos..." -ForegroundColor White
+$logPath = "$apacheRoot\logs"
+Get-ChildItem $logPath -Filter *.log | Remove-Item -Force -ErrorAction SilentlyContinue
+Write-Host "    - OK: Logs limpiados." -ForegroundColor Green
+
+Write-Host "`n--- Intente ejecutar el servicio ahora ---" -ForegroundColor Yellow
 
 
 
-[3/3] Probando Carga de Módulos (httpd -M)...
-    - CRÍTICO: El binario SE CONGELÓ tras 10 segundos.
-SUCCESS: The process with PID 25036 (child process of PID 10956) has been terminated.
-SUCCESS: The process with PID 10956 (child process of PID 1960) has been terminated.
 
+
+
+#####
 
 # ==========================================================
 #   DIAGNÓSTICO ANTIBLOQUEO CORREGIDO (PASOS 1, 2 Y 4)
@@ -472,6 +505,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
