@@ -1,3 +1,20 @@
+Id     Name            PSJobTypeName   State         HasMoreData     Location             Command                  
+--     ----            -------------   -----         -----------     --------             -------                  
+15     PowerShell.E...                 NotStarted    False                                ...                      
+[2026-02-22 12:46:51] [Inicializando] === INICIO DEL PROCESO ===
+[2026-02-22 12:46:51] [Limpieza] Iniciando limpieza profunda
+SUCCESS: The process with PID 18948 (child process of PID 19072) has been terminated.
+[2026-02-22 12:46:53] [Limpieza] Limpieza completada
+[2026-02-22 12:46:53] [Instalación Servicio] Registrando servicio
+[2026-02-22 12:47:08] [Instalación Servicio] Servicio registrado (Verificar en sc query si falló el inicio)
+[2026-02-22 12:47:08] [Inicio Servicio] Intentando iniciar servicio
+[2026-02-22 12:47:08] [Inicio Servicio] Intento de inicio 1 de 10
+[2026-02-22 12:47:09] [Inicio Servicio] Puerto 80 ocupado por PID 4. Ejecutando taskkill.
+[2026-02-22 12:47:10] [Inicio Servicio] ERROR CRÍTICO EN SCRIPT: ERROR: The process with PID 740 (child process of PID 4) could not be terminated.
+[2026-02-22 12:47:10] [Inicio Servicio] Línea de error: 86
+
+
+
 # ==========================================================
 #   APACHE REINSTALL + SISTEMA DE LOG DE RECUPERACIÓN (CORREGIDO)
 # ==========================================================
@@ -148,3 +165,4 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
