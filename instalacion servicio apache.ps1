@@ -7,12 +7,9 @@ $registryPath = "HKLM:\SYSTEM\CurrentControlSet\Services\" + $serviceName
 Write-Host "--- Iniciando Limpieza Profunda y Reinstalación de Apache ---" -ForegroundColor Cyan
 Set-Location $apacheBin
 
-# 2. LIMPIEZA DE PROCESOS ZOMBIS (Solución al cuelgue)
-Write-Host "[1/5] Matando procesos httpd.exe colgados..." -ForegroundColor Yellow
+# 2. LIMPIEZA TOTAL
+Write-Host "[1/5] Limpiando procesos y servicios previos..." -ForegroundColor Yellow
 taskkill /F /IM httpd.exe /T 2>$null
-Start-Sleep -Seconds 2
-
-Write-Host "    - Limpiando rastro del servicio..."
 Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
 sc.exe delete $serviceName | Out-Null
 
@@ -21,14 +18,17 @@ if (Test-Path $registryPath) {
 }
 Start-Sleep -Seconds 2
 
-# 3. Instalación Nueva (MODO DESACOPLADO PARA EVITAR CONGELAMIENTO)
+# 3. INSTALACIÓN (CORREGIDO: Sin conflicto de parámetros)
 Write-Host "[2/5] Registrando nueva instancia del servicio..."
-$installParams = "/c " + $apacheBin + "\httpd.exe -k install -n " + $serviceName
-# Usamos cmd /c para lanzar el comando y desvincularlo del script de PowerShell
-Start-Process "cmd.exe" -ArgumentList $installParams -NoNewWindow -Wait -WindowStyle Hidden
-Write-Host "    - Comando de registro enviado." -ForegroundColor Gray
+$installArgs = "/c " + $apacheBin + "\httpd.exe -k install -n " + $serviceName
 
-# 4. Bucle de 10 reintentos
+# Usamos solo -WindowStyle Hidden para que trabaje en segundo plano sin errores
+$p = Start-Process "cmd.exe" -ArgumentList $installArgs -PassThru -WindowStyle Hidden
+$p | Wait-Process -Timeout 15 -ErrorAction SilentlyContinue
+
+Write-Host "    - Registro completado." -ForegroundColor Gray
+
+# 4. BUCLE DE ARRANQUE (10 Intentos)
 Write-Host "[3/5] Iniciando fase de arranque (Max 10 intentos)..."
 $success = $false
 
@@ -37,54 +37,44 @@ for ($i = 1; $i -le $maxRetries; $i++) {
     $port443 = Get-NetTCPConnection -LocalPort 443 -State Listen -ErrorAction SilentlyContinue
     if ($port443) {
         $pidToKill = $port443.OwningProcess
-        Write-Host ("    - Liberando puerto 443 (PID " + $pidToKill + ")...") -ForegroundColor Gray
-        taskkill /F /PID $pidToKill 2>$null
+        Write-Host ("    - Intento " + $i + " - Liberando puerto 443 (PID " + $pidToKill + ")...") -ForegroundColor Gray
+        taskkill /F /PID $pidToKill /T 2>$null
         Start-Sleep -Seconds 1
     }
 
     # Intentar arrancar
-    Start-Service -Name $serviceName -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 3 # Un poco más de tiempo para el arranque inicial
+    Start-Process "sc.exe" -ArgumentList "start", $serviceName -WindowStyle Hidden -Wait
+    Start-Sleep -Seconds 3
 
     $check = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
     if ($check.Status -eq "Running") {
         Write-Host (" -> ¡ÉXITO! Servicio en línea en el intento " + $i) -ForegroundColor Green
         $success = $true ; break
     } else {
-        Write-Host (" -> Fallo en intento " + $i + ". Reintentando...") -ForegroundColor Yellow
+        Write-Host (" -> Intento " + $i + " fallido. Reintentando...") -ForegroundColor Yellow
     }
 }
 
-# 5. DIAGNÓSTICO FINAL SI FALLA
+# 5. DIAGNÓSTICO PROFUNDO SI FALLA
 if (-not $success) {
     Write-Host "`n[4/5] --- DIAGNÓSTICO DE FALLO ---" -ForegroundColor Red
-    Write-Host "Revisando errores de sintaxis en httpd.conf:" -ForegroundColor White
+    
+    Write-Host "[+] Verificando Sintaxis (httpd -t):" -ForegroundColor Cyan
     $diag = & ./httpd.exe -t 2>&1
     $diag | Out-String | Write-Host -ForegroundColor Yellow
-    
-    Write-Host "`nVerificando si el servicio existe realmente:" -ForegroundColor White
+
+    Write-Host "`n[+] Verificando existencia del servicio:" -ForegroundColor Cyan
     if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
-        Write-Host "El servicio ESTÁ registrado pero no arranca." -ForegroundColor Yellow
+        Write-Host "    - El servicio esta registrado pero no pudo iniciar." -ForegroundColor Yellow
     } else {
-        Write-Host "El servicio NO se registró. Verifique permisos de Administrador." -ForegroundColor Red
+        Write-Host "    - El servicio NO se registro. Revise permisos de Administrador." -ForegroundColor Red
     }
 }
 
 Write-Host "`n[5/5] Proceso finalizado."
 
 
-////
-
-******
-[2/5] Registrando nueva instancia del servicio...
-Start-Process : Parameters "-NoNewWindow" and "-WindowStyle" cannot be specified at the same time.
-At line:28 char:1
-+ Start-Process "cmd.exe" -ArgumentList $installParams -NoNewWindow -Wa ...
-+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (:) [Start-Process], InvalidOperationException
-    + FullyQualifiedErrorId : InvalidOperationException,Microsoft.PowerShell.Commands.StartProcessCommand
-
-//////
+//////************************************
 
 # 1. Configuración de variables
 $serviceName = "HSLS14.2"
@@ -280,6 +270,7 @@ Write-Host "`n[+] Prueba de arranque forzado (Mira si sale algun error abajo):" 
 & $apacheExe -t 2>&1 | Out-String | Write-Host -ForegroundColor Yellow
 
 Write-Host "`n--- Escaneo Finalizado ---"
+
 
 
 
