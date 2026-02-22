@@ -1,4 +1,57 @@
+este hace que pase la valdiacion de sintaxis httpd.conf
 
+# 1. Configuración de rutas
+$serviceName = "HSLS14.2"
+$apacheBin = "C:\HSLS-14.2\Apache\bin"
+$apacheExe = "$apacheBin\httpd.exe"
+
+Write-Host "--- DESBLOQUEO CRÍTICO DE VALIDACIÓN ---" -ForegroundColor Cyan
+
+# 2. MATAR PROCESOS ZOMBIES (Culpables de que se quede pegado)
+Write-Host "[1/4] Forzando cierre de cualquier instancia de Apache..." -ForegroundColor Yellow
+taskkill /F /IM httpd.exe /T 2>$null
+taskkill /F /IM conhost.exe /T 2>$null # A veces la consola se queda trabada con el proceso
+Start-Sleep -Seconds 2
+
+# 3. PRUEBA DE EJECUCIÓN DIRECTA (MODO DEPURACIÓN)
+# Si -t se queda pegado, -X nos dirá qué módulo es el que causa el cuelgue
+Write-Host "[2/4] Intentando cargar en Modo Depuración (Timeout 10s)..." -ForegroundColor Cyan
+Set-Location $apacheBin
+
+$job = Start-Job -ScriptBlock {
+    param($exe)
+    & $exe -X -t 2>&1
+} -ArgumentList $apacheExe
+
+Wait-Job $job -Timeout 10
+$output = Receive-Job $job
+Stop-Job $job
+Remove-Job $job
+
+if ($output) {
+    Write-Host "SALIDA DETECTADA: $output" -ForegroundColor Magenta
+} else {
+    Write-Host "ADVERTENCIA: La validación sigue sin responder. Posible bloqueo de Antivirus o DLL faltante." -ForegroundColor Red
+}
+
+# 4. TRUCO DE REEMPLAZO DE SERVICIO (Por si el registro está corrupto)
+Write-Host "[3/4] Limpiando servicio y registro..." -ForegroundColor Yellow
+sc.exe stop $serviceName 2>$null
+sc.exe delete $serviceName 2>$null
+Remove-Item -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName" -Recurse -Force -ErrorAction SilentlyContinue
+
+# 5. REGISTRO RÁPIDO E INTENTO DE ARRANQUE POR CMD
+Write-Host "[4/4] Reinstalando y arrancando desde CMD..." -ForegroundColor Cyan
+cmd.exe /c "$apacheExe -k install -n $serviceName"
+Start-Sleep -Seconds 2
+cmd.exe /c "net start $serviceName"
+
+Write-Host "`n------------------------------------------------"
+Read-Host "Proceso terminado. Presiona ENTER para salir"
+
+
+
+######### este valida error 1053
 
 # 1. Configuración de rutas
 $serviceName = "HSLS14.2"
@@ -859,6 +912,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
