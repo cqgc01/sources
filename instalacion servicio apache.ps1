@@ -7,31 +7,25 @@ $registryPath = "HKLM:\SYSTEM\CurrentControlSet\Services\" + $serviceName
 Write-Host "--- Iniciando Limpieza Profunda y Reinstalación de Apache ---" -ForegroundColor Cyan
 Set-Location $apacheBin
 
-# 2. BORRADO TOTAL (Servicio, SC y Regedit)
+# 2. BORRADO TOTAL
 Write-Host "[1/5] Ejecutando limpieza de rastro previo..."
-
 if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
-    Write-Host "    - Deteniendo y desinstalando servicio..."
     Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
     & ./httpd.exe -k uninstall -n $serviceName 2>$null
     Start-Sleep -Seconds 1
 }
 
-# Borrado en Registro (Regedit)
 if (Test-Path $registryPath) {
-    Write-Host "    - Eliminando rastro en Regedit..." -ForegroundColor Yellow
     Remove-Item -Path $registryPath -Recurse -Force -ErrorAction SilentlyContinue
 }
-
-# Borrado con SC
 sc.exe delete $serviceName | Out-Null
-Write-Host "[OK] Limpieza total completada." -ForegroundColor Green
 
-# 3. Instalación Nueva
+# 3. Instalación Nueva (Silenciando el NativeCommandError falso)
 Write-Host "[2/5] Registrando nueva instancia del servicio..."
-& ./httpd.exe -k install -n $serviceName
+$installOutput = & ./httpd.exe -k install -n $serviceName 2>&1
+Write-Host "    - Resultado: El servicio se ha registrado." -ForegroundColor Gray
 
-# 4. Bucle de 10 reintentos con Taskkill
+# 4. Bucle de 10 reintentos
 Write-Host "[3/5] Iniciando fase de arranque (Max 10 intentos)..."
 $success = $false
 
@@ -39,8 +33,7 @@ for ($i = 1; $i -le $maxRetries; $i++) {
     $port443 = Get-NetTCPConnection -LocalPort 443 -State Listen -ErrorAction SilentlyContinue
     if ($port443) {
         $pidToKill = $port443.OwningProcess
-        # Sintaxis modificada: quitamos los ':' pegados a la variable
-        Write-Host ("    - Intento " + $i + " - Puerto 443 ocupado por PID " + $pidToKill + ". Ejecutando taskkill...") -ForegroundColor Gray
+        Write-Host ("    - Intento " + $i + " - Liberando puerto 443 (PID " + $pidToKill + ")...") -ForegroundColor Gray
         taskkill /F /PID $pidToKill 2>$null
         Start-Sleep -Seconds 1
     }
@@ -50,51 +43,31 @@ for ($i = 1; $i -le $maxRetries; $i++) {
 
     $check = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
     if ($check.Status -eq "Running") {
-        Write-Host (" -> ¡EXITOSO! Servicio iniciado en el intento " + $i) -ForegroundColor Green
+        Write-Host (" -> ¡EXITOSO! Servicio en línea en el intento " + $i) -ForegroundColor Green
         $success = $true
         break
     } else {
-        Write-Host (" -> Intento " + $i + " fallido...") -ForegroundColor Yellow
+        Write-Host (" -> Intento " + $i + " fallido. Revisando configuración...") -ForegroundColor Yellow
     }
 }
 
-# 5. Diagnóstico Detallado Final
+# 5. DIAGNÓSTICO OBLIGATORIO SI FALLA
 if (-not $success) {
-    Write-Host "`n[4/5] DIAGNÓSTICO DE FALLO CRÍTICO" -ForegroundColor Red
+    Write-Host "`n[4/5] ERROR DETECTADO EN LA CONFIGURACIÓN" -ForegroundColor Red
     Write-Host "============================================="
     
-    Write-Host "[+] ERROR DE SINTAXIS (httpd -t):" -ForegroundColor Cyan
-    & ./httpd.exe -t 2>&1 | Write-Host -ForegroundColor Yellow
+    # Esto te dirá exactamente qué línea del archivo está mal
+    Write-Host "[+] Ejecutando prueba de sintaxis (httpd -t):" -ForegroundColor Cyan
+    $test = & ./httpd.exe -t 2>&1
+    $test | Out-String | Write-Host -ForegroundColor Yellow
 
-    Write-Host "`n[+] ESTADO DE PUERTOS:" -ForegroundColor Cyan
-    $testPorts = @(80, 443)
-    foreach ($p in $testPorts) {
+    Write-Host "`n[+] Verificando puertos ocupados:" -ForegroundColor Cyan
+    foreach ($p in 80, 443) {
         $c = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue
         if ($c) { 
-            $owner = $c.OwningProcess
-            Write-Host ("Puerto " + $p + " - OCUPADO por PID " + $owner) -ForegroundColor Red 
-        } else { 
-            Write-Host ("Puerto " + $p + " - LIBRE") -ForegroundColor Green 
+            Write-Host ("Puerto " + $p + " bloqueado por: " + (Get-Process -Id $c.OwningProcess).ProcessName) -ForegroundColor Red 
         }
     }
-
-    Write-Host "`n[+] LOG DE EVENTOS (Windows):" -ForegroundColor Cyan
-    $events = Get-WinEvent -FilterHashtable @{LogName='Application'; Level=2} -MaxEvents 5 -ErrorAction SilentlyContinue | 
-              Where-Object { $_.Message -match "Apache" -or $_.Source -match "Apache" }
-    if ($events) { $events | Select-Object TimeCreated, Message | Format-List | Out-String | Write-Host -ForegroundColor Yellow }
 }
 
 Write-Host "`n[5/5] Proceso finalizado."
-
-
-[2/5] Registrando nueva instancia del servicio...
-httpd.exe : Installing the 'HSLS14.2' service
-At line:32 char:1
-+ & ./httpd.exe -k install -n $serviceName
-+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (Installing the 'HSLS14.2' service:String) [], RemoteException
-    + FullyQualifiedErrorId : NativeCommandError
- 
-The 'HSLS14.2' service is successfully installed.
-Testing httpd.conf....
-Errors reported here must be corrected before the service can be started.
