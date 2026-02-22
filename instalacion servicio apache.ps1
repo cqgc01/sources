@@ -1,51 +1,57 @@
 ## desinatalar hsls
 
+# 1. Configuración de rutas y variables
 $serviceName = "HSLS14.2"
 $apacheBin = "C:\HSLS-14.2\Apache\bin"
 $apacheExe = "$apacheBin\httpd.exe"
 $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName"
 
-Write-Host "--- Iniciando Reinstalación Total de $serviceName ---" -ForegroundColor Cyan
+Write-Host "--- REINSTALACIÓN TOTAL Y DESBLOQUEO DE $serviceName ---" -ForegroundColor Cyan
 
-# 1. Detener y Borrar el servicio (si existe)
+# 2. Matar procesos huérfanos que bloquean archivos o el registro
+Write-Host "[1/5] Matando procesos de Apache para liberar recursos..." -ForegroundColor Yellow
+taskkill.exe /F /IM httpd.exe /T 2>$null
+Start-Sleep -Seconds 2
+
+# 3. Detener y borrar el servicio de la lista de Windows
+Write-Host "[2/5] Eliminando servicio de la lista del sistema..." -ForegroundColor Yellow
 $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if ($service) {
-    Write-Host "[1/4] El servicio existe. Deteniendo y eliminando..." -ForegroundColor Yellow
     Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
-    sc.exe delete $serviceName | Out-Null
-    Write-Host "Servicio eliminado de la lista de Windows." -ForegroundColor Gray
-} else {
-    Write-Host "[1/4] El servicio no estaba instalado. Procediendo..." -ForegroundColor Gray
+    Start-Sleep -Seconds 1
 }
+sc.exe delete $serviceName | Out-Null
+Write-Host "Servicio marcado para eliminación." -ForegroundColor Gray
 
-# 2. Limpieza forzada en el Registro (Regedit)
+# 4. Limpieza agresiva del Registro (Regedit)
+Write-Host "[3/5] Borrando entradas residuales en el Registro..." -ForegroundColor Yellow
 if (Test-Path $regPath) {
-    Write-Host "[2/4] Eliminando entrada residual en Regedit..." -ForegroundColor Yellow
     Remove-Item -Path $regPath -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Host "Entrada de registro eliminada con éxito." -ForegroundColor Gray
+    Write-Host "Registro limpiado con éxito." -ForegroundColor Gray
 } else {
-    Write-Host "[2/4] No se encontraron residuos en el Registro." -ForegroundColor Gray
+    Write-Host "No se encontraron residuos en el Registro." -ForegroundColor Gray
 }
 
-# 3. Instalación limpia
-Write-Host "[3/4] Registrando el servicio nuevamente..." -ForegroundColor Cyan
+# 5. Instalación Limpia (Modo Directo para evitar bloqueos)
+Write-Host "[4/5] Registrando el servicio nuevamente..." -ForegroundColor Cyan
 if (Test-Path $apacheExe) {
     Set-Location $apacheBin
-    $installResult = & $apacheExe -k install -n $serviceName 2>&1
+    # Usamos Start-Process con redirección para capturar errores si se queda pegado
+    $p = Start-Process -FilePath $apacheExe -ArgumentList "-k install -n $serviceName" -NoNewWindow -PassThru -Wait -RedirectStandardError "install_error.log"
     
-    if ($LASTEXITCODE -eq 0) {
+    if ($p.ExitCode -eq 0) {
         Write-Host "¡Servicio instalado correctamente!" -ForegroundColor Green
     } else {
-        Write-Host "Error durante la instalación: $installResult" -ForegroundColor Red
+        Write-Host "Error durante la instalación. Código: $($p.ExitCode)" -ForegroundColor Red
+        if (Test-Path "install_error.log") { Get-Content "install_error.log" }
     }
 } else {
-    Write-Host "ERROR: No se encontró el ejecutable en $apacheExe" -ForegroundColor Red
-    return
+    Write-Host "ERROR CRÍTICO: No se encontró httpd.exe en $apacheExe" -ForegroundColor Red
+    Read-Host "Presiona ENTER para salir"; exit
 }
 
-# 4. Intento de inicio final
-Write-Host "[4/4] Intentando iniciar el servicio recién instalado..." -ForegroundColor Cyan
+# 6. Intento de inicio final y validación
+Write-Host "[5/5] Iniciando el servicio..." -ForegroundColor Cyan
 Start-Service -Name $serviceName -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 3
 
@@ -53,8 +59,8 @@ $finalStatus = (Get-Service $serviceName -ErrorAction SilentlyContinue).Status
 if ($finalStatus -eq "Running") {
     Write-Host "¡TODO LISTO! El servicio $serviceName está en ejecución." -ForegroundColor Green
 } else {
-    Write-Host "ADVERTENCIA: El servicio se instaló pero no pudo iniciar automáticamente." -ForegroundColor Red
-    Write-Host "Ejecuta: httpd.exe -t para ver errores de configuración." -ForegroundColor Yellow
+    Write-Host "ADVERTENCIA: El servicio no subió." -ForegroundColor Red
+    Write-Host "Ejecuta: .\httpd.exe -t para ver errores de configuración en $apacheBin" -ForegroundColor Yellow
 }
 
 Write-Host "`n------------------------------------------------"
@@ -668,6 +674,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
