@@ -1,3 +1,87 @@
+# ==========================================================
+#   DIAGNÓSTICO ANTIBLOQUEO: PASOS 1, 2 Y 4
+# ==========================================================
+
+$serviceName = "HSLS14.2"
+$apacheBin   = "C:\HSLS-14.2\Apache\bin"
+$apacheExe   = Join-Path $apacheBin "httpd.exe"
+$confFile    = "C:\HSLS-14.2\Apache\conf\httpd.conf"
+
+Write-Host "--- Iniciando Validación de Bloqueos de Carga ---" -ForegroundColor Cyan
+
+# --- PASO 1: VALIDACIÓN DE DNS (ServerName) ---
+Write-Host "`n[1/3] Verificando Resolución de ServerName..." -ForegroundColor White
+if (Test-Path $confFile) {
+    $snLine = Get-Content $confFile | Select-String "^ServerName\s+(.+)" | Select-Object -First 1
+    if ($snLine) {
+        $hostName = ($snLine.Matches.Groups[1].Value).Split(':')[0].Trim()
+        Write-Host "    - Nombre detectado: $hostName" -ForegroundColor Gray
+        try {
+            $ip = [System.Net.Dns]::GetHostEntry($hostName)
+            Write-Host "    - OK: $hostName resuelve a $($ip.AddressList[0])" -ForegroundColor Green
+        } catch {
+            Write-Host "    - ERROR: El nombre '$hostName' NO resuelve. Apache se colgará aquí." -ForegroundColor Red
+            Write-Host "    - Solución: Agregue '127.0.0.1 $hostName' en C:\Windows\System32\drivers\etc\hosts" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "    - Aviso: No se encontró ServerName explícito. Apache usará el nombre del PC." -ForegroundColor Yellow
+    }
+}
+
+# --- PASO 2: VALIDACIÓN DE RUTAS (Locales vs Red/UNC) ---
+Write-Host "`n[2/3] Verificando Rutas de Configuración..." -ForegroundColor White
+if (Test-Path $confFile) {
+    $content = Get-Content $confFile
+    $paths = $content | Select-String -Pattern '(ServerRoot|DocumentRoot|ErrorLog)\s+"?(.+?)"?$'
+    foreach ($line in $paths) {
+        $pathVal = ($line.Matches.Groups[2].Value).Trim('"').Trim()
+        
+        # Detectar rutas de red UNC (Causa común de colgado)
+        if ($pathVal -like "\\*") {
+            Write-Host "    - CRÍTICO: Se detectó ruta de RED ($pathVal). Esto causa bloqueos si no hay acceso." -ForegroundColor Red
+        } elseif (!(Test-Path $pathVal -ErrorAction SilentlyContinue)) {
+            Write-Host "    - ERROR: La ruta '$pathVal' NO existe físicamente." -ForegroundColor Red
+        } else {
+            Write-Host "    - OK: Ruta válida ($pathVal)" -ForegroundColor Green
+        }
+    }
+}
+
+# --- PASO 4: PRUEBA DE CARGA DE BINARIO Y MÓDULOS (Con Timeout) ---
+Write-Host "`n[3/3] Probando Carga de Módulos (httpd -M)..." -ForegroundColor White
+$timeoutSeconds = 10
+$code = { param($exe) & $exe -M 2>&1 }
+$job = Start-Job -ScriptBlock $code -ArgumentList $apacheExe
+
+if (Wait-Job $job -Timeout $timeoutSeconds) {
+    $result = Receive-Job $job | Out-String
+    if ($result -match "error" -or $result -match "failed") {
+        Write-Host "    - Error detectado en la carga de módulos:" -ForegroundColor Yellow
+        $result | Write-Host
+    } else {
+        Write-Host "    - Carga de módulos completada exitosamente." -ForegroundColor Green
+    }
+} else {
+    Write-Host "    - CRÍTICO: El binario SE CONGELÓ tras $timeoutSeconds segundos." -ForegroundColor Red
+    Write-Log "CAUSA: El proceso no responde. Revise Antivirus o dependencias de red."
+    Stop-Job $job
+}
+
+# --- RESUMEN DE DEPENDENCIAS VC++ (Paso 4.5) ---
+Write-Host "`n[EXTR] Verificando librerías base (MSVCP140)..." -ForegroundColor White
+$dllPath = "C:\Windows\System32\msvcp140.dll"
+if (Test-Path $dllPath) {
+    Write-Host "    - Librería VC++ detectada (System32)." -ForegroundColor Green
+} else {
+    Write-Host "    - ERROR: Falta msvcp140.dll. Instale Visual C++ 2015-2022 x64." -ForegroundColor Red
+}
+
+Write-Host "`n--- Diagnóstico Finalizado ---"
+
+
+
+
+
 ###### diagnosticar
 
 # ==========================================================
@@ -386,6 +470,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
