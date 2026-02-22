@@ -1,39 +1,23 @@
 #### DETIENE SERVICIOS DE HSLS
-# 1. Nombre del servicio
 $serviceName = "HSLS14.2"
+Write-Host "--- Consultando PID de $serviceName ---" -ForegroundColor Cyan
 
-Write-Host "--- Iniciando Diagnóstico de $serviceName ---" -ForegroundColor Cyan
-
-# 2. Obtener la información del servicio
 $query = sc.exe queryex $serviceName
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: El servicio '$serviceName' no existe o no está instalado." -ForegroundColor Red
-} else {
-    # 3. Extraer el PID usando una expresión regular limpia
+if ($LASTEXITCODE -eq 0) {
     $pidLine = $query | Select-String "PID"
     $pid = ($pidLine -replace '[^\d]', '').Trim()
 
-    if ($pid -ne "0" -and $pid -ne "") {
-        Write-Host "Proceso detectado con PID: $pid" -ForegroundColor Yellow
-        Write-Host "Intentando forzar el cierre..." -ForegroundColor White
-        
-        # 4. Ejecutar taskkill con el parámetro correcto /PID
+    if ($pid -and $pid -ne "0") {
+        Write-Host "PID Detectado: $pid. Matando proceso..." -ForegroundColor Yellow
         taskkill.exe /F /PID $pid
-        
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "¡ÉXITO! El proceso $pid fue finalizado correctamente." -ForegroundColor Green
-        } else {
-            Write-Host "No se pudo matar el proceso. ¿Tienes permisos de Administrador?" -ForegroundColor Red
-        }
     } else {
-        Write-Host "El PID es 0. El servicio ya está detenido o no se ha iniciado." -ForegroundColor Gray
+        Write-Host "El PID es 0. El servicio no está corriendo." -ForegroundColor Gray
     }
+} else {
+    Write-Host "El servicio $serviceName no existe." -ForegroundColor Red
 }
+Write-Host "`nProceso completado." -ForegroundColor Green
 
-# --- ESTA LÍNEA EVITA QUE SE CIERRE LA VENTANA ---
-Write-Host "`n------------------------------------------"
-Read-Host "Proceso terminado. Presiona ENTER para salir"
 
 
 
@@ -616,6 +600,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
