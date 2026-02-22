@@ -1,3 +1,72 @@
+###### diagnosticar
+
+# ==========================================================
+#   DIAGNÓSTICO MAESTRO - APACHE EN WINDOWS SERVER 2022
+# ==========================================================
+
+$serviceName = "HSLS14.2"
+$apacheBin   = "C:\HSLS-14.2\Apache\bin"
+$apacheExe   = Join-Path $apacheBin "httpd.exe"
+$reportPath  = "C:\HSLS-14.2\Logs\Reporte_Final.txt"
+
+function Write-Report ($titulo, $info) {
+    $linea = "`r`n" + ("="*20) + " $titulo " + ("="*20) + "`r`n$info`r`n"
+    Add-Content -Path $reportPath -Value $linea
+    Write-Host "Analizando $titulo..." -ForegroundColor Cyan
+}
+
+# Crear carpeta de logs si no existe
+if (!(Test-Path (Split-Path $reportPath))) { New-Item -ItemType Directory -Path (Split-Path $reportPath) -Force }
+Set-Content -Path $reportPath -Value "REPORTE TÉCNICO - WINDOWS SERVER 2022 - $(Get-Date)`r`n"
+
+# 1. VERIFICACIÓN DE LIBRERÍAS (VC++ Redistributable)
+# Server 2022 requiere msvcp140.dll y vcruntime140.dll (VS 2015-2022)
+Write-Host "Verificando dependencias de C++..." -ForegroundColor White
+$dlls = "msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"
+$dllReport = ""
+foreach ($dll in $dlls) {
+    $found = Where-Object { Test-Path (Join-Path "C:\Windows\System32" $dll) }
+    if ($found) { $dllReport += "[OK] $dll encontrada en System32`r`n" }
+    else { $dllReport += "[ERROR] FALTA $dll. Instale Visual C++ 2015-2022 x64`r`n" }
+}
+Write-Report "DEPENDENCIAS C++" $dllReport
+
+# 2. PRUEBA DE SINTAXIS Y CARGA DE MÓDULOS
+Write-Host "Probando carga de binario..." -ForegroundColor White
+$syntax = & $apacheExe -t 2>&1 | Out-String
+Write-Report "SINTAXIS HTTPD -T" $syntax
+
+# 3. VERIFICACIÓN DE PUERTOS (Netstat avanzado)
+$portInfo = Get-NetTCPConnection -LocalPort 80,443 -State Listen -ErrorAction SilentlyContinue | 
+            Select-Object LocalPort, OwningProcess, @{Name="ProcessName"; Expression={(Get-Process -Id $_.OwningProcess).Name}} | 
+            Format-Table | Out-String
+Write-Report "CONFLICTOS DE PUERTOS" (if ($portInfo.Trim()) { $portInfo } else { "Puertos 80/443 LIBRES" })
+
+# 4. PRUEBA DE ARRANQUE EN "DEBUG MODE" (Captura el error real)
+Write-Host "Ejecutando arranque manual de prueba (3 seg)..." -ForegroundColor Yellow
+$manual = Start-Process $apacheExe -ArgumentList "-e debug" -NoNewWindow -PassThru -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 3
+if ($manual.HasExited) {
+    Write-Report "FALLO DE EJECUCIÓN DIRECTA" "Apache se cerró con código $($manual.ExitCode). Revise el archivo error.log en la carpeta logs."
+} else {
+    Write-Report "EJECUCIÓN DIRECTA" "El binario funciona manualmente. El problema es el Servicio de Windows (Permisos de cuenta)."
+    Stop-Process -Id $manual.Id -Force
+}
+
+# 5. REVISIÓN DE FIREWALL DE WINDOWS SERVER
+$fw = Get-NetFirewallRule -DisplayName "*Apache*" -ErrorAction SilentlyContinue
+if ($fw) { Write-Report "FIREWALL" "Regla de Apache encontrada." }
+else { Write-Report "FIREWALL" "ADVERTENCIA: No hay reglas de entrada para Apache en el Firewall de Windows." }
+
+Write-Host "`n--- PROCESO TERMINADO ---" -ForegroundColor Green
+Write-Host "Abra el reporte en: $reportPath" -ForegroundColor Yellow
+
+
+
+
+
+###### revisar puertos ssl
+
 # List of services known to grab port 80/443 via PID 4
 $services = @("w3svc", "was", "SyncShareSvc", "iphlpsvc")
 
@@ -317,6 +386,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
