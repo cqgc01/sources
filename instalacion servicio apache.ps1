@@ -1,33 +1,40 @@
 #### DETIENE SERVICIOS DE HSLS
-# 1. Configuración del nombre del servicio
+# 1. Nombre del servicio
 $serviceName = "HSLS14.2"
 
-Write-Host "--- Buscando PID del servicio $serviceName ---" -ForegroundColor Cyan
+Write-Host "--- Iniciando Diagnóstico de $serviceName ---" -ForegroundColor Cyan
 
-# 2. Ejecutar sc queryex y filtrar la línea del PID
-$query = sc.exe queryex $serviceName | Select-String "PID"
+# 2. Obtener la información del servicio
+$query = sc.exe queryex $serviceName
 
-if ($query) {
-    # Extraer solo los números de la línea (el PID)
-    $pid = ($query -replace '[^\d]', '').Trim()
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: El servicio '$serviceName' no existe o no está instalado." -ForegroundColor Red
+} else {
+    # 3. Extraer el PID usando una expresión regular limpia
+    $pidLine = $query | Select-String "PID"
+    $pid = ($pidLine -replace '[^\d]', '').Trim()
 
-    if ($pid -ne "0") {
-        Write-Host "PID detectado: $pid. Procediendo a forzar el cierre..." -ForegroundColor Yellow
+    if ($pid -ne "0" -and $pid -ne "") {
+        Write-Host "Proceso detectado con PID: $pid" -ForegroundColor Yellow
+        Write-Host "Intentando forzar el cierre..." -ForegroundColor White
         
-        # 3. Ejecutar taskkill con el PID encontrado
+        # 4. Ejecutar taskkill con el parámetro correcto /PID
         taskkill.exe /F /PID $pid
         
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "¡ÉXITO! El proceso $pid ha sido finalizado." -ForegroundColor Green
+            Write-Host "¡ÉXITO! El proceso $pid fue finalizado correctamente." -ForegroundColor Green
+        } else {
+            Write-Host "No se pudo matar el proceso. ¿Tienes permisos de Administrador?" -ForegroundColor Red
         }
     } else {
-        Write-Host "El servicio está detenido (PID es 0). No hay proceso que matar." -ForegroundColor White
+        Write-Host "El PID es 0. El servicio ya está detenido o no se ha iniciado." -ForegroundColor Gray
     }
-} else {
-    Write-Host "ERROR: No se pudo obtener información del servicio. ¿Está instalado?" -ForegroundColor Red
 }
 
-Read-Host "`nPresiona Enter para cerrar"
+# --- ESTA LÍNEA EVITA QUE SE CIERRE LA VENTANA ---
+Write-Host "`n------------------------------------------"
+Read-Host "Proceso terminado. Presiona ENTER para salir"
+
 
 
 
@@ -609,6 +616,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
