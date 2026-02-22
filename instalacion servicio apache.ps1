@@ -1,19 +1,5 @@
-    - Servicio registrado.
-[3/5] Intentando iniciar servicio...
-Cannot overwrite variable PID because it is read-only or constant.
-At line:53 char:9
-+         $pid = $connection.OwningProcess
-+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : WriteError: (PID:String) [], ParentContainsErrorRecordException
-    + FullyQualifiedErrorId : VariableNotWritable
-
-
-
-**************************
-
-
 # ==========================================================
-#   APACHE REINSTALL + SISTEMA DE LOG DE RECUPERACIÓN
+#   APACHE REINSTALL + SISTEMA DE LOG DE RECUPERACIÓN (CORREGIDO)
 # ==========================================================
 
 # ---------------------------
@@ -41,18 +27,16 @@ $global:CurrentStep = "Inicializando"
 
 function Write-Log {
     param ($message)
-
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $line = "[$timestamp] [$global:CurrentStep] $message"
+    Write-Host $line -ForegroundColor Cyan
     Add-Content -Path $logFile -Value $line
 }
 
-# Captura cierre inesperado del motor
+# Captura cierre inesperado
 Register-EngineEvent PowerShell.Exiting -Action {
     Add-Content -Path $logFile -Value "[$(Get-Date)] PowerShell se cerró inesperadamente en paso: $global:CurrentStep"
 }
-
-Start-Transcript -Path $logFile -Append
 
 # ==========================================================
 # FUNCIONES
@@ -74,77 +58,76 @@ function Clear-PreviousInstallation {
     Write-Log "Limpieza completada"
 }
 
-# ----------------------------------------------------------
-
 function Install-Service {
     $global:CurrentStep = "Instalación Servicio"
     Write-Log "Registrando servicio"
 
     Set-Location $apacheBin
-    $args = "/c `"$apacheExe`" -k install -n $serviceName"
-    $proc = Start-Process "cmd.exe" -ArgumentList $args -WindowStyle Hidden -PassThru
+    $installArgs = "/c `"$apacheExe`" -k install -n $serviceName"
+    $proc = Start-Process "cmd.exe" -ArgumentList $installArgs -WindowStyle Hidden -PassThru
     $proc | Wait-Process -Timeout 15 -ErrorAction SilentlyContinue
 
-    Write-Log "Servicio registrado"
+    Write-Log "Servicio registrado (Verificar en sc query si falló el inicio)"
 }
-
-# ----------------------------------------------------------
 
 function Start-ServiceWithRetries {
     $global:CurrentStep = "Inicio Servicio"
     Write-Log "Intentando iniciar servicio"
 
     for ($i = 1; $i -le $maxRetries; $i++) {
+        Write-Log "Intento de inicio $i de $maxRetries"
 
-        Write-Log "Intento $i"
-
-        foreach ($port in @(80,443)) {
+        # Liberar puertos bloqueados
+        foreach ($port in @(80, 443)) {
             $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
             if ($conn) {
-                taskkill /F /PID $conn.OwningProcess /T 2>$null
-                Write-Log "Puerto $port liberado"
+                $pToKill = $conn.OwningProcess # CORRECCIÓN: No usamos la variable reservada $PID
+                Write-Log "Puerto $port ocupado por PID $pToKill. Ejecutando taskkill."
+                taskkill /F /PID $pToKill /T 2>$null
+                Start-Sleep -Seconds 1
             }
         }
 
+        # Intentar arrancar
         Start-Process "sc.exe" -ArgumentList "start", $serviceName -WindowStyle Hidden -Wait
-        Start-Sleep -Seconds 3
+        Start-Sleep -Seconds 4
 
         $svc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-        if ($svc.Status -eq "Running") {
-            Write-Log "Servicio iniciado correctamente"
+        if ($svc -and $svc.Status -eq "Running") {
+            Write-Log "¡ÉXITO! Servicio iniciado correctamente"
             return $true
         }
     }
 
-    Write-Log "No se pudo iniciar el servicio después de $maxRetries intentos"
+    Write-Log "No se pudo iniciar el servicio tras los reintentos."
     return $false
 }
 
-# ----------------------------------------------------------
-
 function Run-Diagnostics {
     $global:CurrentStep = "Diagnóstico"
-    Write-Log "Iniciando diagnóstico"
+    Write-Log "Iniciando diagnóstico profundo de fallo"
 
+    # Prueba de sintaxis con protección
     try {
-        & $apacheExe -t 2>&1 | Out-String | Write-Log
+        Write-Log "Resultado de sintaxis (httpd -t):"
+        $diag = & $apacheExe -t 2>&1 | Out-String
+        Write-Log $diag
     } catch {
-        Write-Log "Error en prueba de sintaxis: $($_.Exception.Message)"
+        Write-Log "Error ejecutando diagnóstico: $($_.Exception.Message)"
     }
 
-    foreach ($port in @(80,443)) {
+    # Revisión final de puertos
+    foreach ($port in @(80, 443)) {
         $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
         if ($conn) {
-            $proc = Get-Process -Id $conn.OwningProcess
-            Write-Log "Puerto $port bloqueado por $($proc.ProcessName)"
-        } else {
-            Write-Log "Puerto $port libre"
+            $pName = (Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue).Name
+            Write-Log "Puerto $port sigue bloqueado por: $pName"
         }
     }
 }
 
 # ==========================================================
-# BLOQUE PRINCIPAL CON CAPTURA GLOBAL DE ERRORES
+# BLOQUE PRINCIPAL
 # ==========================================================
 
 try {
@@ -152,22 +135,16 @@ try {
 
     Clear-PreviousInstallation
     Install-Service
+    
     $result = Start-ServiceWithRetries
 
     if (-not $result) {
         Run-Diagnostics
     }
 
-    Write-Log "Proceso finalizado correctamente"
+    Write-Log "=== PROCESO FINALIZADO ==="
 }
 catch {
-    Write-Log "ERROR CRÍTICO: $($_.Exception.Message)"
-    Write-Log "StackTrace: $($_.ScriptStackTrace)"
+    Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
+    Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
-finally {
-    Write-Log "Cierre del script"
-    Stop-Transcript
-}
-
-
-
