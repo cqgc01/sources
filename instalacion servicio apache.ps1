@@ -1,3 +1,56 @@
+##### monitoriear mistras sube el servicio
+
+$serviceName = "HSLS14.2"
+$logFile = "C:\HSL14.2\Apache\logs\error.log" # Ajusta si tu ruta es distinta
+
+Write-Host "--- Iniciando Monitoreo de Diagnóstico para $serviceName ---" -ForegroundColor Cyan
+Write-Host "Paso 1: Limpiando errores antiguos del Visor de Eventos..." -ForegroundColor Gray
+
+# 1. Obtener la hora actual para filtrar solo eventos nuevos
+$startTime = Get-Date
+
+# 2. Intentar iniciar el servicio en segundo plano
+Write-Host "Paso 2: Intentando iniciar el servicio..." -ForegroundColor Yellow
+Start-Service -Name $serviceName -ErrorAction SilentlyContinue
+
+# 3. Esperar unos segundos para que Windows registre el fallo (Error 1053 suele tardar)
+Write-Host "Esperando respuesta del sistema..." -ForegroundColor Gray
+Start-Sleep -Seconds 5
+
+# 4. Diagnóstico Automático
+$serviceStatus = Get-Service $serviceName
+
+if ($serviceStatus.Status -ne "Running") {
+    Write-Host "`n[!] EL SERVICIO NO SUBIÓ. Analizando causas..." -ForegroundColor Red
+
+    # BUSCAR EN EL VISOR DE EVENTOS (System y Application)
+    Write-Host "`n--- ERRORES ENCONTRADOS EN WINDOWS (Últimos 2 minutos) ---" -ForegroundColor White
+    Get-WinEvent -FilterHashtable @{
+        LogName = 'System','Application'
+        StartTime = $startTime
+        Level = 2 # Solo Errores
+    } -ErrorAction SilentlyContinue | Select-Object TimeCreated, Message | Format-List
+
+    # BUSCAR EN EL LOG DE APACHE
+    if (Test-Path $logFile) {
+        Write-Host "--- ÚLTIMAS LÍNEAS DEL ERROR.LOG DE APACHE ---" -ForegroundColor White
+        Get-Content $logFile -Tail 10
+    }
+
+    # PRUEBA DE SINTAXIS MANUAL (La prueba definitiva)
+    Write-Host "`n--- PRUEBA DE SINTAXIS (httpd.exe -t) ---" -ForegroundColor White
+    & "C:\HSL14.2\Apache\bin\httpd.exe" -t 2>&1
+
+} else {
+    Write-Host "¡ÉXITO! El servicio está corriendo correctamente." -ForegroundColor Green
+}
+
+Write-Host "`n------------------------------------------------"
+Read-Host "Monitoreo finalizado. Presiona ENTER para salir"
+
+
+
+
 #### DETIENE SERVICIOS DE HSLS
 $serviceName = "HSLS14.2"
 Write-Host "--- Consultando PID de $serviceName ---" -ForegroundColor Cyan
@@ -600,6 +653,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
