@@ -1,7 +1,7 @@
 ## desinatalar hsls
 
 $serviceName = "HSL14.2"
-$apacheBin = "C:\HSL14.2\Apache\bin"
+$apacheBin = "C:\HSLS-14.2\Apache\bin"
 $apacheExe = "$apacheBin\httpd.exe"
 $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName"
 
@@ -668,6 +668,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
