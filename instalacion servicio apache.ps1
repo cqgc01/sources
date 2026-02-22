@@ -83,43 +83,43 @@ $serviceName = "HSLS14.2"
 $apacheBin = "C:\HSLS-14.2\Apache\bin"
 $apacheExe = Join-Path $apacheBin "httpd.exe"
 
-Write-Host "--- Iniciando Monitor de Servicio Apache ---" -ForegroundColor Cyan
+Write-Host "--- Iniciando Monitor de Servicio Apache (Modo No-Bloqueante) ---" -ForegroundColor Cyan
 
-# 2. Intento de arranque con tiempo límite (Timeout)
+# 2. Intento de arranque desacoplado
 $svc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if (-not $svc) {
-    Write-Host "[!] El servicio " + $serviceName + " no esta registrado." -ForegroundColor Red
+    Write-Host ("[!] El servicio " + $serviceName + " no esta registrado.") -ForegroundColor Red
     exit
 }
 
 if ($svc.Status -ne "Running") {
-    Write-Host "Arrancando servicio (espera maxima 5 seg)..."
-    # Iniciamos el servicio sin esperar a que Windows termine de confirmarlo (que es donde se cuelga)
-    Start-Service -Name $serviceName -ErrorAction SilentlyContinue
+    Write-Host "Lanzando comando de arranque (Sin esperar confirmacion)..."
+    # Usamos Start-Process para que PowerShell NO se quede colgado esperando
+    Start-Process "sc.exe" -ArgumentList "start", $serviceName -NoNewWindow
     Start-Sleep -Seconds 5
 }
 
-# 3. Validación Final y Búsqueda de la Causa
+# 3. Diagnóstico Inmediato (Incluso si sc.exe sigue trabajando)
+Write-Host "`n[ANALISIS] Verificando estado y posibles causas de fallo..." -ForegroundColor White
 $checkSvc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-if ($checkSvc.Status -ne "Running") {
-    Write-Host "`n[FALLO] El servicio no pudo estabilizarse." -ForegroundColor Red
-    Write-Host "==============================================================="
 
-    # CAUSA A: Error de Sintaxis (ESTO ES LO MÁS PROBABLE)
-    Write-Host "[+] ANALIZANDO SINTAXIS EN EL ARCHIVO CONF" -ForegroundColor Cyan
+if ($checkSvc.Status -ne "Running") {
+    Write-Host "===============================================================" -ForegroundColor Red
+    
+    # CAUSA 1: Error de Sintaxis (La mas probable)
+    Write-Host "[+] PRUEBA DE SINTAXIS (httpd -t)" -ForegroundColor Cyan
     if (Test-Path $apacheExe) {
-        # Ejecutamos el test de sintaxis y capturamos TODO el error
         $syntax = & $apacheExe -t 2>&1
         $syntaxStr = $syntax | Out-String
         if ($syntaxStr -match "error" -or $syntaxStr -match "failed") {
-            Write-Host "[!] ERROR DE CONFIGURACION ENCONTRADO" -ForegroundColor Yellow
+            Write-Host "[!] ERROR ENCONTRADO EN httpd.conf" -ForegroundColor Yellow
             Write-Host $syntaxStr
         } else { 
             Write-Host "    - Sintaxis - OK" -ForegroundColor Green 
         }
     }
 
-    # CAUSA B: Puertos bloqueados
+    # CAUSA 2: Conflictos de Puertos
     Write-Host "`n[+] ANALIZANDO PUERTOS (80/443)" -ForegroundColor Cyan
     $testPorts = @(80, 443)
     foreach ($p in $testPorts) {
@@ -132,11 +132,12 @@ if ($checkSvc.Status -ne "Running") {
         }
     }
 
-    # CAUSA C: Ejecución Manual para ver el error "en vivo"
-    Write-Host "`n[+] PRUEBA DE ARRANQUE MANUAL (Salida directa de Apache)" -ForegroundColor Cyan
-    Write-Host "Ejecutando httpd.exe directamente..." -ForegroundColor Gray
-    # Lanzamos apache directamente para ver si escupe algun error en consola
-    & $apacheExe -e info -t | Out-String | Write-Host -ForegroundColor Yellow
+    # CAUSA 3: Intento de ejecucion manual para ver el error real
+    Write-Host "`n[+] EJECUCION MANUAL DE PRUEBA" -ForegroundColor Cyan
+    Write-Host "Si Apache no inicia, aqui deberia aparecer el motivo tecnico:" -ForegroundColor Gray
+    # Ejecutamos con -e info para forzar la salida de errores al terminal
+    $manualRun = & $apacheExe -e info -t 2>&1
+    $manualRun | Out-String | Write-Host -ForegroundColor Yellow
 
 } else {
     Write-Host "EXITO - El servicio esta en ejecucion." -ForegroundColor Green
