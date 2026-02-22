@@ -1,5 +1,12 @@
-Get-Content "C:\HSLS-14.2\Apache\conf\httpd.conf" | Select-String "^ServerName"
 
+=== INICIANDO REINSTALACIÓN COMPLETA DE APACHE ===
+[1/5] Limpieza profunda...
+taskkill : ERROR: The process "httpd.exe" not found.
+At line:22 char:5
++     taskkill /F /IM httpd.exe /T 2>$null
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (ERROR: The proc...exe" not found.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
 
 # ==========================================================
 #   APACHE REINSTALL + SISTEMA DE LOG DE RECUPERACIÓN (CORREGIDO)
@@ -200,4 +207,5 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
