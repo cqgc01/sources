@@ -1,3 +1,12 @@
+
+
+
+[3/3] Probando Carga de Módulos (httpd -M)...
+    - CRÍTICO: El binario SE CONGELÓ tras 10 segundos.
+SUCCESS: The process with PID 25036 (child process of PID 10956) has been terminated.
+SUCCESS: The process with PID 10956 (child process of PID 1960) has been terminated.
+
+
 # ==========================================================
 #   DIAGNÓSTICO ANTIBLOQUEO CORREGIDO (PASOS 1, 2 Y 4)
 # ==========================================================
@@ -463,6 +472,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
