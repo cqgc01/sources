@@ -71,3 +71,72 @@ if (-not $success) {
 }
 
 Write-Host "`n[5/5] Proceso finalizado."
+
+
+////
+
+# 1. Configuración de variables
+$serviceName = "HSLS14.2"
+$apacheBin = "C:\HSLS-14.2\Apache\bin"
+$apacheExe = Join-Path $apacheBin "httpd.exe"
+
+Write-Host "--- Iniciando Monitor de Servicio Apache ---" -ForegroundColor Cyan
+
+# 2. Intento de arranque
+$svc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+if (-not $svc) {
+    Write-Host "[!] El servicio '$serviceName' no está registrado." -ForegroundColor Red
+    exit
+}
+
+if ($svc.Status -ne "Running") {
+    Write-Host "Arrancando servicio..."
+    Start-Service -Name $serviceName -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 3
+}
+
+# 3. Validación y Búsqueda Profunda si falló
+if ((Get-Service $serviceName).Status -ne "Running") {
+    Write-Host "`n[FALLO] No se pudo iniciar. Iniciando búsqueda profunda de la causa..." -ForegroundColor Red
+    Write-Host "==============================================================="
+
+    # CAUSA A: Error de Sintaxis (httpd -t)
+    Write-Host "[+] ANALIZANDO SINTAXIS DEL ARCHIVO CONF:" -ForegroundColor Cyan
+    if (Test-Path $apacheExe) {
+        $syntax = & $apacheExe -t 2>&1
+        if ($syntax -match "Syntax error") {
+            Write-Host "[!] ERROR DE SINTAXIS DETECTADO:" -ForegroundColor Yellow
+            $syntax | Out-String | Write-Host
+        } else { Write-Host "    - Sintaxis: OK" -ForegroundColor Green }
+    }
+
+    # CAUSA B: Conflictos de Puertos (80/443)
+    Write-Host "`n[+] ANALIZANDO CONFLICTOS DE RED (PUERTOS):" -ForegroundColor Cyan
+    $puertos = 80, 443
+    foreach ($p in $puertos) {
+        $conn = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue
+        if ($conn) {
+            $proc = Get-Process -Id $conn.OwningProcess
+            Write-Host "[!] Puerto $p bloqueado por: $($proc.ProcessName) (PID: $($proc.Id))" -ForegroundColor Red
+        } else { Write-Host "    - Puerto $p: Libre" -ForegroundColor Green }
+    }
+
+    # CAUSA C: Logs del Sistema (Visor de Eventos)
+    Write-Host "`n[+] BUSCANDO ERRORES EN EVENT VIEWER (Últimos 5 min):" -ForegroundColor Cyan
+    $timeLimit = (Get-Date).AddMinutes(-5)
+    $events = Get-WinEvent -FilterHashtable @{LogName='Application'; Level=2; StartTime=$timeLimit} -ErrorAction SilentlyContinue | 
+              Where-Object { $_.Message -match "Apache" -or $_.Source -match "Apache" }
+    if ($events) {
+        $events | Select-Object TimeCreated, Message | Format-Table -AutoSize -Wrap
+    } else { Write-Host "    - No hay eventos recientes de Apache." -ForegroundColor Green }
+
+    # CAUSA D: Permisos de Carpeta
+    Write-Host "`n[+] VERIFICANDO PERMISOS DE ACCESO:" -ForegroundColor Cyan
+    $acl = Get-Acl (Split-Path $apacheBin)
+    Write-Host "    - Propietario actual: $($acl.Owner)"
+} else {
+    Write-Host "¡EXITO! El servicio está en ejecución." -ForegroundColor Green
+}
+
+Write-Host "`n--- Auditoría Finalizada ---"
+
