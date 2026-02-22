@@ -144,3 +144,75 @@ if ($checkSvc.Status -ne "Running") {
 }
 
 Write-Host "`n--- Auditoria Finalizada ---"
+
+
+/////
+# 1. Configuración de rutas
+$serviceName = "HSLS14.2"
+$apacheBin = "C:\HSLS-14.2\Apache\bin"
+$apacheExe = Join-Path $apacheBin "httpd.exe"
+
+Write-Host "--- Iniciando Diagnóstico con Protección contra Congelamiento ---" -ForegroundColor Cyan
+
+# 2. Matar cualquier proceso previo que pueda estar bloqueando
+Write-Host "Limpiando procesos zombis..." -ForegroundColor Gray
+taskkill /F /IM httpd.exe /T 2>$null
+Start-Sleep -Seconds 1
+
+# 3. Intento de arranque asíncrono
+Write-Host "Lanzando comando de inicio..."
+Start-Process "sc.exe" -ArgumentList "start", $serviceName -NoNewWindow
+Start-Sleep -Seconds 3
+
+# 4. DIAGNÓSTICO CON TIMEOUT (Para que no se quede pegado)
+Write-Host "`n[ANALISIS] Verificando causas de fallo..."
+$checkSvc = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+
+if ($checkSvc.Status -ne "Running") {
+    Write-Host "===============================================================" -ForegroundColor Red
+    
+    # PRUEBA DE SINTAXIS CON TIEMPO LÍMITE
+    Write-Host "[+] PRUEBA DE SINTAXIS (Max 5 segundos)..." -ForegroundColor Cyan
+    $syntaxTask = Start-Process -FilePath $apacheExe -ArgumentList "-t" -NoNewWindow -PassThru -ErrorAction SilentlyContinue
+    
+    # Esperar 5 segundos, si no, lo matamos
+    $wait = $syntaxTask | Wait-Process -Timeout 5 -ErrorAction SilentlyContinue
+    
+    if ($null -eq $wait) {
+        Write-Host "[!] CRITICO - El comando 'httpd -t' SE CONGELÓ." -ForegroundColor Red
+        Write-Host "CAUSA PROBABLE - Apache esta intentando conectar a una ruta de red invalida o un DNS que no responde." -ForegroundColor Yellow
+        taskkill /F /ID $syntaxTask.Id /T 2>$null
+    } else {
+        # Si terminó a tiempo, capturamos el error
+        $errorMsg = & $apacheExe -t 2>&1
+        $errorMsg | Out-String | Write-Host -ForegroundColor Yellow
+    }
+
+    # CAUSA 2: Puertos
+    Write-Host "`n[+] ANALIZANDO PUERTOS (80/443)..." -ForegroundColor Cyan
+    $testPorts = @(80, 443)
+    foreach ($p in $testPorts) {
+        $conn = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue
+        if ($conn) {
+            $procName = (Get-Process -Id $conn.OwningProcess).ProcessName
+            Write-Host ("    - Puerto " + $p + " bloqueado por - " + $procName) -ForegroundColor Red
+        } else { 
+            Write-Host ("    - Puerto " + $p + " - Libre") -ForegroundColor Green 
+        }
+    }
+
+    # CAUSA 3: Verificación de rutas en el archivo
+    Write-Host "`n[+] REVISIÓN DE RUTAS EN EL ARCHIVO CONF..." -ForegroundColor Cyan
+    $confFile = Join-Path (Split-Path $apacheBin) "conf\httpd.conf"
+    if (Test-Path $confFile) {
+        $content = Get-Content $confFile
+        $serverRoot = $content | Select-String "ServerRoot" | Select-Object -First 1
+        Write-Host ("    - " + $serverRoot) -ForegroundColor Gray
+    }
+
+} else {
+    Write-Host "EXITO - El servicio esta corriendo." -ForegroundColor Green
+}
+
+Write-Host "`n--- Diagnostico Finalizado ---"
+
