@@ -75,6 +75,14 @@ Write-Host "`n[5/5] Proceso finalizado."
 
 ////
 
+******
+[2/5] Registrando nueva instancia del servicio...
+Start-Process : Parameters "-NoNewWindow" and "-WindowStyle" cannot be specified at the same time.
+At line:28 char:1
++ Start-Process "cmd.exe" -ArgumentList $installParams -NoNewWindow -Wa ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [Start-Process], InvalidOperationException
+    + FullyQualifiedErrorId : InvalidOperationException,Microsoft.PowerShell.Commands.StartProcessCommand
 
 //////
 
@@ -272,5 +280,6 @@ Write-Host "`n[+] Prueba de arranque forzado (Mira si sale algun error abajo):" 
 & $apacheExe -t 2>&1 | Out-String | Write-Host -ForegroundColor Yellow
 
 Write-Host "`n--- Escaneo Finalizado ---"
+
 
 
