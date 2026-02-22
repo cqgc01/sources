@@ -5,44 +5,48 @@ $serviceName = "HSL14.2"
 Write-Host "--- Iniciando proceso de instalación de Apache ---" -ForegroundColor Cyan
 Set-Location $apacheBin
 
-# 2. Limpieza de servicios previos
-Write-Host "Limpiando registros antiguos..."
+# Función para limpiar puerto 443
+function Libera-Puerto443 {
+    $port443 = Get-NetTCPConnection -LocalPort 443 -State Listen -ErrorAction SilentlyContinue
+    if ($port443) {
+        $pidToKill = $port443.OwningProcess[0]
+        $proceso = Get-Process -Id $pidToKill
+        Write-Host "Liberando puerto 443 (Cerrando $($proceso.ProcessName)...)" -ForegroundColor Yellow
+        Stop-Process -Id $pidToKill -Force -Confirm:$false
+        Start-Sleep -Seconds 2 # Espera a que el sistema libere el socket
+    }
+}
+
+# 2. Limpieza inicial
+Write-Host "Limpiando registros y puertos antiguos..."
 net stop $serviceName 2>$null
 ./httpd.exe -k uninstall -n $serviceName 2>$null
+Libera-Puerto443
 
 # 3. Instalación del servicio
 Write-Host "Registrando el servicio..."
 ./httpd.exe -k install -n $serviceName
 
-# 4. Intento de inicio y detección de errores
+# 4. Intento de inicio y reintento si falla
 Write-Host "Intentando iniciar el servicio..."
 Start-Service -Name $serviceName -ErrorAction SilentlyContinue
 
 if ((Get-Service $serviceName).Status -ne "Running") {
-    Write-Host "¡ERROR! El servicio no subió. Iniciando diagnóstico..." -ForegroundColor Red
+    Write-Host "El servicio no inició. Reintentando tras limpieza profunda..." -ForegroundColor Yellow
     
-    # Prueba de Sintaxis
-    $syntax = ./httpd.exe -t 2>&1
-    if ($syntax -match "Syntax error") {
-        Write-Host "CAUSA DETECTADA: Error de sintaxis en el archivo de configuración." -ForegroundColor Yellow
-        Write-Host "DETALLE: $syntax"
-    } 
-    
-    # Prueba de Puertos (80 y 443)
-    $port80 = Get-NetTCPConnection -LocalPort 80 -State Listen -ErrorAction SilentlyContinue
-    $port443 = Get-NetTCPConnection -LocalPort 443 -State Listen -ErrorAction SilentlyContinue
-    
-    if ($port80 -or $port443) {
-        Write-Host "CAUSA DETECTADA: El puerto 80 o 443 está OCUPADO." -ForegroundColor Yellow
-        
-        # Lógica compatible para identificar el PID
-        if ($port80) { $pidToCheck = $port80.OwningProcess[0] }
-        else { $pidToCheck = $port443.OwningProcess[0] }
+    # Segundo intento: Forzar limpieza total
+    Libera-Puerto443
+    ./httpd.exe -k uninstall -n $serviceName 2>$null
+    ./httpd.exe -k install -n $serviceName
+    Start-Service -Name $serviceName -ErrorAction SilentlyContinue
+}
 
-        $occupant = Get-Process -Id $pidToCheck
-        Write-Host "El programa que bloquea es: $($occupant.ProcessName) (PID: $($occupant.Id))"
-        Write-Host "Sugerencia: Cierra ese programa o cambia el 'Listen' en httpd.conf"
-    }
+# 5. Verificación Final
+$finalStatus = Get-Service $serviceName -ErrorAction SilentlyContinue
+if ($finalStatus.Status -eq "Running") {
+    Write-Host "¡ÉXITO! Apache está corriendo correctamente." -ForegroundColor Green
 } else {
-    Write-Host "¡ÉXITO! El servicio de Apache está corriendo." -ForegroundColor Green
+    Write-Host "¡ERROR CRÍTICO! No se pudo iniciar Apache." -ForegroundColor Red
+    # Diagnóstico de sintaxis rápido
+    ./httpd.exe -t
 }
