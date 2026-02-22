@@ -1,3 +1,28 @@
+# List of services known to grab port 80/443 via PID 4
+$services = @("w3svc", "was", "SyncShareSvc", "iphlpsvc")
+
+Write-Host "--- Attempting to free port 443 ---" -ForegroundColor Cyan
+
+foreach ($svcName in $services) {
+    $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+    
+    if ($svc -and $svc.Status -eq 'Running') {
+        Write-Host "Stopping service: $svcName..." -NoNewline
+        Stop-Service -Name $svcName -Force
+        Write-Host " DONE" -ForegroundColor Green
+    }
+}
+
+# Verify if port 443 is now open
+$check = Get-NetTCPConnection -LocalPort 443 -State Listen -ErrorAction SilentlyContinue
+if ($check) {
+    Write-Host "`n[!] Port 443 is STILL occupied by PID $($check.OwningProcess)." -ForegroundColor Red
+} else {
+    Write-Host "`n[+] Port 443 is now FREE. You can start Apache!" -ForegroundColor Green
+}
+
+
+
 ##### nueva version
 # ==========================================================
 #   APACHE FORENSIC & RECOVERY SCRIPT
@@ -292,6 +317,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
