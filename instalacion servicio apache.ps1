@@ -1,5 +1,4 @@
-
-# 1. Configuración de rutas (AJUSTA ESTA RUTA A TU CARPETA BIN)
+# 1. Configuración de rutas
 $apacheBin = "C:\HSL14.2\Apache\bin"
 $serviceName = "HSL14.2"
 
@@ -19,26 +18,33 @@ Write-Host "Registrando el servicio..."
 Write-Host "Intentando iniciar el servicio..."
 $startResult = Start-Service -Name $serviceName -ErrorAction SilentlyContinue
 
-if ((Get-Service $serviceName).Status -ne "Running") {
+$currentService = Get-Service $serviceName -ErrorAction SilentlyContinue
+
+if (-not $currentService -or $currentService.Status -ne "Running") {
     Write-Host "¡ERROR! El servicio no subió. Iniciando diagnóstico..." -ForegroundColor Red
     
     # Prueba de Sintaxis
     $syntax = ./httpd.exe -t 2>&1
-    if ($syntax -match "Syntax error") {
-        Write-Host "CAUSA DETECTADA: Error de sintaxis en el archivo de configuración." -ForegroundColor Yellow
+    if ($syntax -match "Syntax error" -or $syntax -match "error") {
+        Write-Host "CAUSA DETECTADA: Error de configuración." -ForegroundColor Yellow
         Write-Host "DETALLE: $syntax"
     } 
     
-    # Prueba de Puertos (80 y 443)
-    $port80 = Get-NetTCPConnection -LocalPort 80 -ErrorAction SilentlyContinue
-    $port443 = Get-NetTCPConnection -LocalPort 443 -ErrorAction SilentlyContinue
+    # Prueba de Puertos (80 y 443) - CORREGIDO
+    $port80 = Get-NetTCPConnection -LocalPort 80 -ErrorAction SilentlyContinue | Select-Object -First 1
+    $port443 = Get-NetTCPConnection -LocalPort 443 -ErrorAction SilentlyContinue | Select-Object -First 1
     
     if ($port80 -or $port443) {
-        Write-Host "CAUSA DETECTADA: El puerto 80 o 443 está OCUPADO." -ForegroundColor Yellow
-        $occupant = Get-Process -Id ($port80.OwningProcess[0] ? $port80.OwningProcess[0] : $port443.OwningProcess[0])
-        Write-Host "El programa que bloquea es: $($occupant.ProcessName) (PID: $($occupant.Id))"
-        Write-Host "Sugerencia: Cierra ese programa o cambia el 'Listen' en httpd.conf"
+        $pidToKill = if ($port80) { $port80.OwningProcess } else { $port443.OwningProcess }
+        $occupant = Get-Process -Id $pidToKill -ErrorAction SilentlyContinue
+        
+        Write-Host "CAUSA DETECTADA: El puerto está OCUPADO." -ForegroundColor Yellow
+        if ($occupant) {
+            Write-Host "El programa que bloquea es: $($occupant.ProcessName) (PID: $($occupant.Id))"
+        } else {
+            Write-Host "El PID bloqueador es: $pidToKill (Posiblemente un servicio del Sistema)"
+        }
     }
 } else {
-    Write-Host "¡ÉXITO! El servicio de Apache está corriendo." -ForegroundColor Green
+    Write-Host "¡ÉXITO! El servicio de Apache ($serviceName) está corriendo." -ForegroundColor Green
 }
