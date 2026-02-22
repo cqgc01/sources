@@ -1,3 +1,6 @@
+Get-Content "C:\HSLS-14.2\Apache\conf\httpd.conf" | Select-String "^ServerName"
+
+
 # ==========================================================
 #   APACHE REINSTALL + SISTEMA DE LOG DE RECUPERACIÓN (CORREGIDO)
 #   APACHE REINSTALL + DESACTIVACIÓN DE IIS
@@ -197,3 +200,4 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
