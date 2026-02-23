@@ -1,3 +1,16 @@
+Access denied - C:\Windows\System32\drivers\etc\hosts
+Set-Acl : Attempted to perform an unauthorized operation.
+At line:18 char:5
++     Set-Acl -Path $hostsPath -AclObject $acl
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (C:\Windows\System32\drivers\etc\h 
+   osts:String) [Set-Acl], UnauthorizedAccessException
+    + FullyQualifiedErrorId : System.UnauthorizedAccessException,Microsoft.PowerSh 
+   ell.Commands.SetAclCommand
+ 
+
+############
+
 $hostsPath = "C:\Windows\System32\drivers\etc\hosts"
 
 Write-Host "--- Otorgando Control Total sobre el archivo Hosts ---" -ForegroundColor Cyan
@@ -969,6 +982,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
