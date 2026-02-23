@@ -1,53 +1,41 @@
---- Ajustando Prioridad de Resolucion Local ---
-Set-ItemProperty : Exception setting "IsReadOnly": "Access to the path is denied."
-At line:8 char:5
-+     Set-ItemProperty -Path $hostsPath -Name IsReadOnly -Value $false
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (:) [Set-ItemProperty], SetValueInvoca 
-   tionException
-    + FullyQualifiedErrorId : CatchFromBaseAdapterSetValue,Microsoft.PowerShell.Co 
-   mmands.SetItemPropertyCommand
- 
-[1] Atributos de archivo: OK
-[2] Reiniciando cache de red...
-[3] Probando resolucion para misitio.local...
-Exception calling "GetHostAddresses" with "1" argument(s): "No such host is known"
-At line:20 char:1
-+ $result = [System.Net.Dns]::GetHostAddresses($testName) | Select-Obje ...
-+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
-    + FullyQualifiedErrorId : SocketException
- 
-[!] ALERTA: El sistema sigue consultando al DNS externo o la regla esta mal escrita.
-
-# --- Script de Forzado de Prioridad Hosts ---
 $hostsPath = "C:\Windows\System32\drivers\etc\hosts"
+$rule = "127.0.0.1  misitio.local"
 
-Write-Host "--- Ajustando Prioridad de Resolucion Local ---" -ForegroundColor Cyan
+Write-Host "--- Forzando Acceso al Archivo Hosts ---" -ForegroundColor Cyan
 
-# A. Quitar atributos de Solo Lectura o Sistema que bloquean la lectura
-if (Test-Path $hostsPath) {
-    Set-ItemProperty -Path $hostsPath -Name IsReadOnly -Value $false
-    Write-Host "[1] Atributos de archivo: OK" -ForegroundColor Green
+try {
+    # Tomar propiedad y dar permisos totales al usuario actual
+    $acl = Get-Acl $hostsPath
+    $permission = "$env:USERNAME","FullControl","Allow"
+    $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule($permission)
+    $acl.SetAccessRule($accessRule)
+    Set-Acl $hostsPath $acl
+
+    # Quitar atributo de Solo Lectura (Read-Only) de forma física
+    attrib -r $hostsPath
+
+    # Agregar la regla solo si no existe para evitar duplicados
+    $content = Get-Content $hostsPath
+    if ($content -notcontains $rule) {
+        Add-Content -Path $hostsPath -Value "`n$rule" -Encoding ASCII
+        Write-Host "[OK] Regla añadida correctamente." -ForegroundColor Green
+    } else {
+        Write-Host "[!] La regla ya existe en el archivo." -ForegroundColor Yellow
+    }
+
+    # Limpiar caché de red
+    ipconfig /flushdns | Out-Null
+    Write-Host "[OK] Cache de DNS refrescada." -ForegroundColor Green
+
+} catch {
+    Write-Host "[ERROR] No se pudo modificar el archivo. Detalle: $($_.Exception.Message)" -ForegroundColor Red
 }
 
-# B. Reiniciar el servicio DNS Client (Fuerza la relectura del archivo)
-Write-Host "[2] Reiniciando cache de red..." -ForegroundColor White
-Restart-Service Dnscache -ErrorAction SilentlyContinue
-ipconfig /flushdns | Out-Null
-
-# C. Prueba de Fuego
-$testName = "misitio.local" # CAMBIA ESTO POR TU NOMBRE EN EL .CONF
-Write-Host "[3] Probando resolucion para $testName..." -ForegroundColor White
-$result = [System.Net.Dns]::GetHostAddresses($testName) | Select-Object -ExpandProperty IPAddressToString -ErrorAction SilentlyContinue
-
-if ($result -eq "127.0.0.1") {
-    Write-Host "¡EXITO! El archivo hosts tiene la prioridad maxima." -ForegroundColor Green
-} else {
-    Write-Host "[!] ALERTA: El sistema sigue consultando al DNS externo o la regla esta mal escrita." -ForegroundColor Red
-}
 
 #############
+
+
+
 $hostsPath = "C:\Windows\System32\drivers\etc\hosts"
 $nombreBusqueda = "localhost" # Cambia esto por el nombre que quieres probar
 
@@ -989,6 +977,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
