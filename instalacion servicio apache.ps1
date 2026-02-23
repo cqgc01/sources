@@ -1,3 +1,25 @@
+--- Ajustando Prioridad de Resolucion Local ---
+Set-ItemProperty : Exception setting "IsReadOnly": "Access to the path is denied."
+At line:8 char:5
++     Set-ItemProperty -Path $hostsPath -Name IsReadOnly -Value $false
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [Set-ItemProperty], SetValueInvoca 
+   tionException
+    + FullyQualifiedErrorId : CatchFromBaseAdapterSetValue,Microsoft.PowerShell.Co 
+   mmands.SetItemPropertyCommand
+ 
+[1] Atributos de archivo: OK
+[2] Reiniciando cache de red...
+[3] Probando resolucion para misitio.local...
+Exception calling "GetHostAddresses" with "1" argument(s): "No such host is known"
+At line:20 char:1
++ $result = [System.Net.Dns]::GetHostAddresses($testName) | Select-Obje ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+    + FullyQualifiedErrorId : SocketException
+ 
+[!] ALERTA: El sistema sigue consultando al DNS externo o la regla esta mal escrita.
+
 # --- Script de Forzado de Prioridad Hosts ---
 $hostsPath = "C:\Windows\System32\drivers\etc\hosts"
 
@@ -967,6 +989,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
