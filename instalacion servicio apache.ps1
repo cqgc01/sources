@@ -1,4 +1,31 @@
+# --- Script de Forzado de Prioridad Hosts ---
+$hostsPath = "C:\Windows\System32\drivers\etc\hosts"
 
+Write-Host "--- Ajustando Prioridad de Resolucion Local ---" -ForegroundColor Cyan
+
+# A. Quitar atributos de Solo Lectura o Sistema que bloquean la lectura
+if (Test-Path $hostsPath) {
+    Set-ItemProperty -Path $hostsPath -Name IsReadOnly -Value $false
+    Write-Host "[1] Atributos de archivo: OK" -ForegroundColor Green
+}
+
+# B. Reiniciar el servicio DNS Client (Fuerza la relectura del archivo)
+Write-Host "[2] Reiniciando cache de red..." -ForegroundColor White
+Restart-Service Dnscache -ErrorAction SilentlyContinue
+ipconfig /flushdns | Out-Null
+
+# C. Prueba de Fuego
+$testName = "misitio.local" # CAMBIA ESTO POR TU NOMBRE EN EL .CONF
+Write-Host "[3] Probando resolucion para $testName..." -ForegroundColor White
+$result = [System.Net.Dns]::GetHostAddresses($testName) | Select-Object -ExpandProperty IPAddressToString -ErrorAction SilentlyContinue
+
+if ($result -eq "127.0.0.1") {
+    Write-Host "¡EXITO! El archivo hosts tiene la prioridad maxima." -ForegroundColor Green
+} else {
+    Write-Host "[!] ALERTA: El sistema sigue consultando al DNS externo o la regla esta mal escrita." -ForegroundColor Red
+}
+
+#############
 $hostsPath = "C:\Windows\System32\drivers\etc\hosts"
 $nombreBusqueda = "localhost" # Cambia esto por el nombre que quieres probar
 
@@ -940,6 +967,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
