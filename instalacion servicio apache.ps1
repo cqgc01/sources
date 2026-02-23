@@ -1,4 +1,32 @@
-este hace que pase la valdiacion de sintaxis httpd.conf
+
+$hostsPath = "C:\Windows\System32\drivers\etc\hosts"
+$nombreBusqueda = "localhost" # Cambia esto por el nombre que quieres probar
+
+Write-Host "--- Validando Archivo Hosts ---" -ForegroundColor Cyan
+
+# A. Verificar existencia y permisos
+if (Test-Path $hostsPath) {
+    Write-Host "[OK] Archivo encontrado." -ForegroundColor Green
+} else {
+    Write-Host "[ERROR] El archivo no existe en la ruta estandar." -ForegroundColor Red
+}
+
+# B. Buscar el nombre dentro del texto
+$linea = Get-Content $hostsPath | Where-Object { $_ -match "^[^#].*$nombreBusqueda" }
+if ($linea) {
+    Write-Host "[OK] Se encontro la regla activa: $linea" -ForegroundColor Green
+} else {
+    Write-Host "[AVISO] No se encontro una regla activa para '$nombreBusqueda'." -ForegroundColor Yellow
+}
+
+# C. Limpiar Cache de DNS (Paso critico para que funcione)
+Write-Host "Limpiando cache de DNS para refrescar cambios..." -ForegroundColor Gray
+ipconfig /flushdns | Out-Null
+Write-Host "[OK] Cache limpia." -ForegroundColor Green
+
+
+
+#####este hace que pase la valdiacion de sintaxis httpd.conf
 
 # 1. Configuración de rutas
 $serviceName = "HSLS14.2"
@@ -912,6 +940,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
