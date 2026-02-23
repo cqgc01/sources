@@ -1,34 +1,26 @@
 $hostsPath = "C:\Windows\System32\drivers\etc\hosts"
-$rule = "127.0.0.1  misitio.local"
 
-Write-Host "--- Forzando Acceso al Archivo Hosts ---" -ForegroundColor Cyan
+Write-Host "--- Otorgando Control Total sobre el archivo Hosts ---" -ForegroundColor Cyan
 
 try {
-    # Tomar propiedad y dar permisos totales al usuario actual
-    $acl = Get-Acl $hostsPath
-    $permission = "$env:USERNAME","FullControl","Allow"
-    $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule($permission)
-    $acl.SetAccessRule($accessRule)
-    Set-Acl $hostsPath $acl
-
-    # Quitar atributo de Solo Lectura (Read-Only) de forma física
+    # 1. Quitar el atributo de 'Solo lectura' (Read-only) del sistema
     attrib -r $hostsPath
 
-    # Agregar la regla solo si no existe para evitar duplicados
-    $content = Get-Content $hostsPath
-    if ($content -notcontains $rule) {
-        Add-Content -Path $hostsPath -Value "`n$rule" -Encoding ASCII
-        Write-Host "[OK] Regla añadida correctamente." -ForegroundColor Green
-    } else {
-        Write-Host "[!] La regla ya existe en el archivo." -ForegroundColor Yellow
-    }
+    # 2. Obtener el ACL actual
+    $acl = Get-Acl $hostsPath
 
-    # Limpiar caché de red
-    ipconfig /flushdns | Out-Null
-    Write-Host "[OK] Cache de DNS refrescada." -ForegroundColor Green
+    # 3. Crear la regla: Usuario actual + Control Total + Permitir
+    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($currentUser, "FullControl", "Allow")
 
-} catch {
-    Write-Host "[ERROR] No se pudo modificar el archivo. Detalle: $($_.Exception.Message)" -ForegroundColor Red
+    # 4. Aplicar la regla al objeto ACL y guardarlo en el archivo
+    $acl.SetAccessRule($rule)
+    Set-Acl -Path $hostsPath -AclObject $acl
+
+    Write-Host "[OK] Permisos concedidos a: $currentUser" -ForegroundColor Green
+}
+catch {
+    Write-Host "[ERROR] No se pudo cambiar los permisos. Detalle: $($_.Exception.Message)" -ForegroundColor Red
 }
 
 
@@ -977,6 +969,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
