@@ -1,13 +1,6 @@
-Access denied - C:\Windows\System32\drivers\etc\hosts
-Set-Acl : Attempted to perform an unauthorized operation.
-At line:18 char:5
-+     Set-Acl -Path $hostsPath -AclObject $acl
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : PermissionDenied: (C:\Windows\System32\drivers\etc\h 
-   osts:String) [Set-Acl], UnauthorizedAccessException
-    + FullyQualifiedErrorId : System.UnauthorizedAccessException,Microsoft.PowerSh 
-   ell.Commands.SetAclCommand
- 
+$f1 = Get-ChildItem -Recurse -Path "C:\ruta\carpeta1"
+$f2 = Get-ChildItem -Recurse -Path "C:\ruta\carpeta2"
+Compare-Object -ReferenceObject $f1 -DifferenceObject $f2
 
 ############
 
@@ -982,6 +975,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
