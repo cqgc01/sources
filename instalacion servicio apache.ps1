@@ -1,6 +1,8 @@
 $f1 = Get-ChildItem -Recurse -Path "C:\ruta\carpeta1"
 $f2 = Get-ChildItem -Recurse -Path "C:\ruta\carpeta2"
-Compare-Object -ReferenceObject $f1 -DifferenceObject $f2
+
+Compare-Object -ReferenceObject $f1 -DifferenceObject $f2 -Property Name, Length -PassThru
+
 
 ############
 
@@ -975,6 +977,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
