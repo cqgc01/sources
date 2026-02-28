@@ -1,3 +1,13 @@
+# Quick search for httpd.exe errors in last 24 hours
+Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddHours(-24)} | Where-Object {$_.Message -like "*httpd.exe*"}
+
+# Count httpd.exe errors
+(Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddDays(-7)} | Where-Object {$_.Message -like "*httpd.exe*"}).Count
+
+# Export to CSV
+Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddDays(-7)} | Where-Object {$_.Message -like "*httpd.exe*"} | Select-Object TimeCreated, LevelDisplayName, Id, Message | Export-Csv httpd_errors.csv -NoTypeInformation
+======
+
 $f1 = Get-ChildItem -Recurse -Path "C:\ruta\carpeta1"
 $f2 = Get-ChildItem -Recurse -Path "C:\ruta\carpeta2"
 
@@ -977,6 +987,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
