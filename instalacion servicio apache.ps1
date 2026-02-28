@@ -1,3 +1,7 @@
+
+Get-WinEvent -LogName System | Where-Object { $_.LevelDisplayName -eq "Error" -and $_.TimeCreated -ge (Get-Date).AddMinutes(-30) } | Select-Object TimeCreated, Message | Out-GridView
+
+
 Get-WinEvent -LogName System | Where-Object { $_.ProviderName -eq "Service Control Manager" -and $_.Message -like "*Apache2.4*" } | Select-Object -First 10 | Format-List TimeCreated, Message
 
 
@@ -1117,6 +1121,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
