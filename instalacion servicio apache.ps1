@@ -1,3 +1,129 @@
+# httpd-error-monitor.ps1
+
+param(
+    [int]$Days = 7,
+    [string[]]$LogNames = @("Application", "System"),
+    [switch]$ExportCSV,
+    [string]$ExportPath = ".\httpd_errors_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv",
+    [switch]$Detailed,
+    [switch]$SendEmail,
+    [string]$EmailTo,
+    [string]$EmailFrom,
+    [string]$SmtpServer
+)
+
+function Get-HttpdErrors {
+    param(
+        [string]$LogName,
+        [datetime]$StartDate,
+        [datetime]$EndDate
+    )
+    
+    try {
+        $Events = Get-WinEvent -FilterHashtable @{
+            LogName = $LogName
+            Level = 1,2,3
+            StartTime = $StartDate
+            EndTime = $EndDate
+        } -ErrorAction SilentlyContinue | 
+        Where-Object { 
+            $_.Message -like "*httpd.exe*" -or 
+            $_.ProviderName -like "*httpd*" -or
+            $_.Message -like "*Apache*"
+        }
+        
+        return $Events
+    }
+    catch {
+        Write-Warning "Error searching $LogName : $_"
+        return $null
+    }
+}
+
+$StartDate = (Get-Date).AddDays(-$Days)
+$EndDate = Get-Date
+
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  httpd.exe Event Error Detector" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "Search Period: $StartDate to $EndDate"
+Write-Host "Log Names: $($LogNames -join ', ')"
+Write-Host ""
+
+$AllEvents = @()
+
+foreach ($LogName in $LogNames) {
+    Write-Host "Searching $LogName log..." -ForegroundColor Yellow
+    $Events = Get-HttpdErrors -LogName $LogName -StartDate $StartDate -EndDate $EndDate
+    
+    if ($Events) {
+        $AllEvents += $Events
+        Write-Host "  Found $($Events.Count) event(s) in $LogName" -ForegroundColor Green
+    }
+}
+
+if ($AllEvents.Count -gt 0) {
+    Write-Host ""
+    Write-Host "Total Errors Found: $($AllEvents.Count)" -ForegroundColor Red
+    Write-Host ""
+    
+    # Group by error level
+    $ErrorSummary = $AllEvents | Group-Object LevelDisplayName | 
+    Select-Object Name, Count | Sort-Object Count -Descending
+    
+    Write-Host "Error Summary:" -ForegroundColor Cyan
+    $ErrorSummary | Format-Table -AutoSize
+    
+    if ($Detailed) {
+        Write-Host ""
+        Write-Host "Detailed Event Information:" -ForegroundColor Cyan
+        Write-Host "========================================" -ForegroundColor Cyan
+        
+        foreach ($Event in $AllEvents) {
+            Write-Host ""
+            Write-Host "Time: $($Event.TimeCreated)" -ForegroundColor Yellow
+            Write-Host "Level: $($Event.LevelDisplayName)" -ForegroundColor $(
+                if ($Event.LevelDisplayName -eq "Error") { "Red" }
+                elseif ($Event.LevelDisplayName -eq "Warning") { "Yellow" }
+                else { "Green" }
+            )
+            Write-Host "Event ID: $($Event.Id)"
+            Write-Host "Source: $($Event.ProviderName)"
+            Write-Host "Message: $($Event.Message)"
+            Write-Host "----------------------------------------"
+        }
+    }
+    else {
+        Write-Host ""
+        Write-Host "Recent Events (Last 10):" -ForegroundColor Cyan
+        $AllEvents | Select-Object -First 10 | 
+        Select-Object TimeCreated, LevelDisplayName, Id, ProviderName, 
+            @{Name="Message";Expression={$_.Message.Substring(0, [Math]::Min(100, $_.Message.Length))}} |
+        Format-Table -AutoSize -Wrap
+    }
+    
+    if ($ExportCSV) {
+        $AllEvents | Select-Object TimeCreated, LevelDisplayName, Id, ProviderName, Message | 
+        Export-Csv -Path $ExportPath -NoTypeInformation -Encoding UTF8
+        Write-Host ""
+        Write-Host "Results exported to: $ExportPath" -ForegroundColor Green
+    }
+    
+    if ($SendEmail -and $EmailTo -and $EmailFrom -and $SmtpServer) {
+        $Body = $AllEvents | ConvertTo-Html -Fragment | Out-String
+        Send-MailMessage -To $EmailTo -From $EmailFrom -Subject "httpd.exe Errors Detected" -Body $Body -SmtpServer $SmtpServer
+        Write-Host "Email notification sent to $EmailTo" -ForegroundColor Green
+    }
+}
+else {
+    Write-Host ""
+    Write-Host "No httpd.exe errors found in the specified period." -ForegroundColor Green
+}
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Cyan
+=====
+
 # Quick search for httpd.exe errors in last 24 hours
 Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddHours(-24)} | Where-Object {$_.Message -like "*httpd.exe*"}
 
@@ -987,6 +1113,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
