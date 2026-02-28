@@ -1,16 +1,4 @@
-# PowerShell: Verificar puerto 443
-Get-NetTCPConnection -LocalPort 443 -ErrorAction SilentlyContinue | 
-    Select-Object LocalAddress, LocalPort, State, OwningProcess |
-    ForEach-Object {
-        $proc = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
-        [PSCustomObject]@{
-            Port = $_.LocalPort
-            Process = $proc.ProcessName
-            PID = $_.OwningProcess
-            State = $_.State
-        }
-    }
-
+Get-WinEvent -LogName System | Where-Object { $_.ProviderName -eq "Service Control Manager" -and $_.Message -like "*Apache2.4*" } | Select-Object -First 10 | Format-List TimeCreated, Message
 
 
 ==========
@@ -1129,6 +1117,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
