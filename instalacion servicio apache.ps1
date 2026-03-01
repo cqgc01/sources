@@ -1,10 +1,209 @@
 
-Get-WinEvent -LogName System | Where-Object { $_.LevelDisplayName -eq "Error" -and $_.TimeCreated -ge (Get-Date).AddMinutes(-30) } | Select-Object TimeCreated, Message | Out-GridView
+# Crear punto de restauración (ejecutar como Administrador)
+Checkpoint-Computer -Description "Backup antes de eliminar servicio" -RestorePointType "MODIFY_SETTINGS"
+-------------
+
+# Remove-Service-Complete.ps1
+# Ejecutar SIEMPRE como Administrador
+
+param(
+    [Parameter(Mandatory=$true)]
+    [string]$ServiceName,
+    
+    [Parameter(Mandatory=$true)]
+    [string]$ServiceDisplayName,
+    
+    [switch]$WhatIf,        # Solo mostrar lo que se haría
+    [switch]$Force,         # Omitir confirmaciones
+    [switch]$BackupRegistry # Crear backup del registro antes de eliminar
+)
+
+# Verificar privilegios de administrador
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Error "⚠️  Este script debe ejecutarse como Administrador"
+    exit 1
+}
+
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  Eliminación Completa de Servicio" -ForegroundColor Cyan
+Write-Host "  Servicio: $ServiceDisplayName ($ServiceName)" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+
+# Función para crear backup de clave de registro
+function Backup-RegistryKey {
+    param([string]$KeyPath)
+    $BackupPath = "$env:TEMP\RegistryBackup_$(Get-Date -Format 'yyyyMMdd_HHmmss').reg"
+    reg export "$KeyPath" "$BackupPath" /y 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  ✓ Backup creado: $BackupPath" -ForegroundColor Green
+        return $BackupPath
+    }
+    return $null
+}
+
+# Función para eliminar clave de registro con manejo de errores
+function Remove-RegistryKeySafe {
+    param([string]$KeyPath)
+    try {
+        if (Test-Path "Registry::$KeyPath") {
+            Remove-Item -Path "Registry::$KeyPath" -Recurse -Force -ErrorAction Stop
+            Write-Host "  ✓ Eliminado: $KeyPath" -ForegroundColor Green
+            return $true
+        } else {
+            Write-Host "  ℹ No encontrado: $KeyPath" -ForegroundColor Yellow
+            return $false
+        }
+    }
+    catch {
+        Write-Warning "  ✗ Error al eliminar $KeyPath : $_"
+        return $false
+    }
+}
+
+# ==================== PASO 1: Detener y eliminar servicio ====================
+Write-Host "[1/6] Deteniendo y eliminando servicio..." -ForegroundColor Yellow
+
+$service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($service) {
+    if ($service.Status -ne 'Stopped') {
+        Write-Host "  • Deteniendo servicio..."
+        Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 3
+    }
+    
+    if ($WhatIf) {
+        Write-Host "  [WhatIf] Se eliminaría el servicio: $ServiceName" -ForegroundColor Cyan
+    } else {
+        sc.exe delete $ServiceName | Out-Null
+        Start-Sleep -Seconds 2
+        Write-Host "  ✓ Servicio eliminado con sc.exe" -ForegroundColor Green
+    }
+} else {
+    Write-Host "  ℹ El servicio '$ServiceName' no está instalado o ya fue eliminado" -ForegroundColor Yellow
+}
+
+# ==================== PASO 2: Limpieza de Registro - Servicios ====================
+Write-Host ""
+Write-Host "[2/6] Limpiando registro de servicios..." -ForegroundColor Yellow
+
+$ServiceRegPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
+if ($BackupRegistry) { Backup-RegistryKey "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\$ServiceName" }
+Remove-RegistryKeySafe $ServiceRegPath
+
+# También verificar en ControlSet001, ControlSet002, etc.
+$ControlSets = Get-ChildItem "HKLM:\SYSTEM" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'ControlSet[0-9]+' }
+foreach ($cs in $ControlSets) {
+    $path = "$($cs.PSPath)\Services\$ServiceName"
+    if ($BackupRegistry -and (Test-Path $path)) { 
+        Backup-RegistryKey "$($cs.Name)\Services\$ServiceName" 
+    }
+    Remove-RegistryKeySafe $path
+}
+
+# ==================== PASO 3: Limpieza DCOM - AppID ====================
+Write-Host ""
+Write-Host "[3/6] Buscando y limpiando entradas DCOM (AppID)..." -ForegroundColor Yellow
+
+$appidPath = "HKCR:\AppID"
+if (Test-Path $appidPath) {
+    $appids = Get-ChildItem $appidPath -ErrorAction SilentlyContinue
+    foreach ($appid in $appids) {
+        try {
+            $value = Get-ItemProperty $appid.PSPath -ErrorAction SilentlyContinue
+            # Buscar por nombre de servicio o ejecutable
+            if ($value -and ($value.AppID -like "*$ServiceName*" -or 
+                            $value."(Default)" -like "*$ServiceDisplayName*" -or
+                            $value.ServiceDll -like "*$ServiceName*")) {
+                
+                if ($BackupRegistry) { Backup-RegistryKey "$($appid.PSPath)" }
+                Write-Host "  • Encontrado AppID relacionado: $($appid.PSChildName)" -ForegroundColor Magenta
+                if (-not $WhatIf) {
+                    Remove-Item $appid.PSPath -Recurse -Force -ErrorAction SilentlyContinue
+                    Write-Host "  ✓ Eliminado AppID: $($appid.PSChildName)" -ForegroundColor Green
+                }
+            }
+        } catch { Write-Warning "  Error procesando AppID: $($appid.PSChildName)" }
+    }
+}
+
+# ==================== PASO 4: Limpieza DCOM - CLSID ====================
+Write-Host ""
+Write-Host "[4/6] Buscando y limpiando entradas DCOM (CLSID)..." -ForegroundColor Yellow
+
+$clsidPath = "HKCR:\CLSID"
+if (Test-Path $clsidPath) {
+    $clsids = Get-ChildItem $clsidPath -ErrorAction SilentlyContinue
+    foreach ($clsid in $clsids) {
+        try {
+            $value = Get-ItemProperty $clsid.PSPath -ErrorAction SilentlyContinue
+            if ($value -and ($value."(Default)" -like "*$ServiceDisplayName*" -or
+                            $value.LocalServer32 -like "*$ServiceName*" -or
+                            $value.LocalService -like "*$ServiceName*")) {
+                
+                if ($BackupRegistry) { Backup-RegistryKey "$($clsid.PSPath)" }
+                Write-Host "  • Encontrado CLSID relacionado: $($clsid.PSChildName)" -ForegroundColor Magenta
+                if (-not $WhatIf) {
+                    Remove-Item $clsid.PSPath -Recurse -Force -ErrorAction SilentlyContinue
+                    Write-Host "  ✓ Eliminado CLSID: $($clsid.PSChildName)" -ForegroundColor Green
+                }
+            }
+        } catch { Write-Warning "  Error procesando CLSID: $($clsid.PSChildName)" }
+    }
+}
+
+# ==================== PASO 5: Limpieza adicional ====================
+Write-Host ""
+Write-Host "[5/6] Limpieza adicional..." -ForegroundColor Yellow
+
+# Eliminar posibles entradas en EventLog
+$EventLogReg = "HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\Application\$ServiceName"
+if ($BackupRegistry -and (Test-Path $EventLogReg)) { Backup-RegistryKey "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\EventLog\Application\$ServiceName" }
+Remove-RegistryKeySafe $EventLogReg
+
+# Eliminar entradas de firewall si existen
+$FirewallReg = "HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules"
+if (Test-Path $FirewallReg) {
+    $rules = Get-ItemProperty $FirewallReg -ErrorAction SilentlyContinue | 
+             Get-Member -MemberType NoteProperty | 
+             Where-Object { $_.Name -like "*$ServiceName*" -or $_.Name -like "*$ServiceDisplayName*" }
+    foreach ($rule in $rules) {
+        if (-not $WhatIf) {
+            Remove-ItemProperty -Path $FirewallReg -Name $rule.Name -Force -ErrorAction SilentlyContinue
+            Write-Host "  ✓ Eliminado regla de firewall: $($rule.Name)" -ForegroundColor Green
+        }
+    }
+}
+
+# ==================== PASO 6: Verificación final ====================
+Write-Host ""
+Write-Host "[6/6] Verificación final..." -ForegroundColor Yellow
+
+$remaining = @()
+$remaining += Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+$remaining += Get-ChildItem "HKLM:\SYSTEM\CurrentControlSet\Services" -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*$ServiceName*" }
+$remaining += Get-ChildItem "HKCR:\AppID" -ErrorAction SilentlyContinue | Where-Object { 
+    (Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue)."(Default)" -like "*$ServiceDisplayName*" 
+}
+
+if ($remaining.Count -eq 0) {
+    Write-Host ""
+    Write-Host "✅ ¡Eliminación completada exitosamente!" -ForegroundColor Green
+    Write-Host "   Se recomienda REINICIAR el equipo para aplicar todos los cambios." -ForegroundColor Cyan
+} else {
+    Write-Host ""
+    Write-Host "⚠️  Aún se encontraron $($remaining.Count) elementos relacionados:" -ForegroundColor Red
+    $remaining | ForEach-Object { Write-Host "   • $($_.Name)" -ForegroundColor Red }
+    Write-Host ""
+    Write-Host "   Puede requerir reinicio o eliminación manual adicional." -ForegroundColor Yellow
+}
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Cyan
 
 
-Get-WinEvent -LogName System | Where-Object { $_.ProviderName -eq "Service Control Manager" -and $_.Message -like "*Apache2.4*" } | Select-Object -First 10 | Format-List TimeCreated, Message
 
-
+==========
 ==========
 # httpd-error-monitor.ps1
 
@@ -1121,6 +1320,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
