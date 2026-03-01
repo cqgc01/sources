@@ -1,42 +1,84 @@
+# ============================================================================
+# Remove-HSLS-Service.ps1
+# Eliminación completa del servicio "HSLS 14.2" (Incluyendo Registro y DCOM)
+# ============================================================================
+# ⚠️ EJECUTAR COMO ADMINISTRADOR
+# ============================================================================
 
-# Crear punto de restauración (ejecutar como Administrador)
-Checkpoint-Computer -Description "Backup antes de eliminar servicio" -RestorePointType "MODIFY_SETTINGS"
--------------
+# Configuración del servicio a eliminar
+$ServiceName = "HSLS 14.2"           # Nombre interno del servicio
+$ServiceDisplayName = "HSLS 14.2"    # Nombre visible en services.msc
 
-# Remove-Service-Complete.ps1
-# Ejecutar SIEMPRE como Administrador
+# Opciones de configuración
+$BackupRegistry = $true              # Crear backup del registro antes de eliminar
+$WhatIf = $false                     # $true = solo simular, $false = eliminar realmente
+$ConfirmBeforeDelete = $true         # Pedir confirmación antes de eliminar
 
-param(
-    [Parameter(Mandatory=$true)]
-    [string]$ServiceName,
-    
-    [Parameter(Mandatory=$true)]
-    [string]$ServiceDisplayName,
-    
-    [switch]$WhatIf,        # Solo mostrar lo que se haría
-    [switch]$Force,         # Omitir confirmaciones
-    [switch]$BackupRegistry # Crear backup del registro antes de eliminar
-)
+# ============================================================================
+# NO MODIFICAR DESDE AQUÍ HACIA ABAJO (a menos que sepas lo que haces)
+# ============================================================================
 
 # Verificar privilegios de administrador
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Error "⚠️  Este script debe ejecutarse como Administrador"
+    Write-Host ""
+    Write-Host "❌ ERROR: Este script debe ejecutarse como Administrador" -ForegroundColor Red
+    Write-Host "   Haz clic derecho en PowerShell → 'Ejecutar como administrador'" -ForegroundColor Yellow
+    Write-Host ""
+    pause
     exit 1
 }
 
+Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  Eliminación Completa de Servicio" -ForegroundColor Cyan
-Write-Host "  Servicio: $ServiceDisplayName ($ServiceName)" -ForegroundColor Cyan
+Write-Host "  ELIMINACIÓN COMPLETA DE SERVICIO" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
+Write-Host " Servicio a eliminar: $ServiceDisplayName" -ForegroundColor White
+Write-Host " Nombre interno: $ServiceName" -ForegroundColor White
+Write-Host " Backup de registro: $([bool]$BackupRegistry)" -ForegroundColor White
+Write-Host " Modo simulación: $WhatIf" -ForegroundColor White
+Write-Host ""
+
+# Confirmación antes de proceder
+if ($ConfirmBeforeDelete -and -not $WhatIf) {
+    Write-Host "⚠️  ADVERTENCIA: Esta acción eliminará permanentemente el servicio y sus entradas de registro." -ForegroundColor Yellow
+    Write-Host "   ¿Estás seguro de que deseas continuar?" -ForegroundColor Yellow
+    Write-Host ""
+    $confirmation = Read-Host "   Escribe 'SI' para confirmar o cualquier otra tecla para cancelar"
+    if ($confirmation -ne 'SI') {
+        Write-Host ""
+        Write-Host "❌ Operación cancelada por el usuario." -ForegroundColor Red
+        Write-Host ""
+        pause
+        exit 0
+    }
+}
+
+# Crear punto de restauración del sistema
+if (-not $WhatIf) {
+    Write-Host "[0/7] Creando punto de restauración del sistema..." -ForegroundColor Yellow
+    try {
+        Checkpoint-Computer -Description "Antes de eliminar HSLS 14.2" -RestorePointType "MODIFY_SETTINGS" -ErrorAction SilentlyContinue
+        Write-Host "  ✓ Punto de restauración creado" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "  ⚠ No se pudo crear punto de restauración (continuará de todas formas)" -ForegroundColor Yellow
+    }
+}
 
 # Función para crear backup de clave de registro
 function Backup-RegistryKey {
     param([string]$KeyPath)
-    $BackupPath = "$env:TEMP\RegistryBackup_$(Get-Date -Format 'yyyyMMdd_HHmmss').reg"
-    reg export "$KeyPath" "$BackupPath" /y 2>$null
+    $Timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+    $BackupFolder = "$env:TEMP\RegistryBackup_HSLS"
+    if (!(Test-Path $BackupFolder)) { New-Item -ItemType Directory -Path $BackupFolder -Force | Out-Null }
+    
+    $BackupPath = "$BackupFolder\Backup_$Timestamp.reg"
+    $KeyPathReg = $KeyPath -replace 'HKEY_LOCAL_MACHINE', 'HKLM' -replace 'HKEY_CLASSES_ROOT', 'HKCR'
+    
+    reg export "$KeyPathReg" "$BackupPath" /y 2>$null
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "  ✓ Backup creado: $BackupPath" -ForegroundColor Green
+        Write-Host "  ✓ Backup: $BackupPath" -ForegroundColor Green
         return $BackupPath
     }
     return $null
@@ -51,7 +93,7 @@ function Remove-RegistryKeySafe {
             Write-Host "  ✓ Eliminado: $KeyPath" -ForegroundColor Green
             return $true
         } else {
-            Write-Host "  ℹ No encontrado: $KeyPath" -ForegroundColor Yellow
+            Write-Host "  ℹ No encontrado: $KeyPath" -ForegroundColor Gray
             return $false
         }
     }
@@ -61,147 +103,222 @@ function Remove-RegistryKeySafe {
     }
 }
 
-# ==================== PASO 1: Detener y eliminar servicio ====================
-Write-Host "[1/6] Deteniendo y eliminando servicio..." -ForegroundColor Yellow
+# ============================================================================
+# PASO 1: Buscar y verificar el servicio
+# ============================================================================
+Write-Host ""
+Write-Host "[1/7] Buscando el servicio..." -ForegroundColor Yellow
 
 $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-if ($service) {
-    if ($service.Status -ne 'Stopped') {
-        Write-Host "  • Deteniendo servicio..."
-        Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 3
-    }
-    
-    if ($WhatIf) {
-        Write-Host "  [WhatIf] Se eliminaría el servicio: $ServiceName" -ForegroundColor Cyan
-    } else {
-        sc.exe delete $ServiceName | Out-Null
-        Start-Sleep -Seconds 2
-        Write-Host "  ✓ Servicio eliminado con sc.exe" -ForegroundColor Green
-    }
-} else {
-    Write-Host "  ℹ El servicio '$ServiceName' no está instalado o ya fue eliminado" -ForegroundColor Yellow
+if (-not $service) {
+    # Intentar buscar por DisplayName
+    $service = Get-Service | Where-Object { $_.DisplayName -eq $ServiceDisplayName }
 }
 
-# ==================== PASO 2: Limpieza de Registro - Servicios ====================
+if ($service) {
+    Write-Host "  ✓ Servicio encontrado: $($service.Name)" -ForegroundColor Green
+    Write-Host "    Estado: $($service.Status)" -ForegroundColor Cyan
+    Write-Host "    Nombre para comandos: $($service.Name)" -ForegroundColor Cyan
+    $ServiceName = $service.Name  # Usar el nombre real encontrado
+} else {
+    Write-Host "  ⚠ El servicio '$ServiceName' no se encontró instalado" -ForegroundColor Yellow
+    Write-Host "    Continuando con limpieza de registro por si hay residuos..." -ForegroundColor Yellow
+}
+
+# ============================================================================
+# PASO 2: Detener y eliminar servicio
+# ============================================================================
 Write-Host ""
-Write-Host "[2/6] Limpiando registro de servicios..." -ForegroundColor Yellow
+Write-Host "[2/7] Deteniendo y eliminando servicio..." -ForegroundColor Yellow
+
+if ($service -and $service.Status -ne 'Stopped') {
+    Write-Host "  • Deteniendo servicio..."
+    if (-not $WhatIf) {
+        Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 3
+    } else {
+        Write-Host "  [WhatIf] Se detendría el servicio" -ForegroundColor Cyan
+    }
+}
+
+if ($service -or (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)) {
+    if (-not $WhatIf) {
+        $deleteResult = sc.exe delete $ServiceName 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  ✓ Servicio eliminado con sc.exe" -ForegroundColor Green
+        } else {
+            Write-Host "  ⚠ sc.exe reportó: $deleteResult" -ForegroundColor Yellow
+        }
+        Start-Sleep -Seconds 2
+    } else {
+        Write-Host "  [WhatIf] Se eliminaría el servicio con: sc delete $ServiceName" -ForegroundColor Cyan
+    }
+} else {
+    Write-Host "  ℹ El servicio ya no está instalado" -ForegroundColor Yellow
+}
+
+# ============================================================================
+# PASO 3: Limpieza de Registro - Servicios
+# ============================================================================
+Write-Host ""
+Write-Host "[3/7] Limpiando registro de servicios..." -ForegroundColor Yellow
 
 $ServiceRegPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
-if ($BackupRegistry) { Backup-RegistryKey "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\$ServiceName" }
-Remove-RegistryKeySafe $ServiceRegPath
+if ($BackupRegistry -and (Test-Path $ServiceRegPath)) { 
+    Backup-RegistryKey "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\$ServiceName" 
+}
+if (-not $WhatIf) { Remove-RegistryKeySafe $ServiceRegPath }
 
-# También verificar en ControlSet001, ControlSet002, etc.
+# Verificar otros ControlSets
 $ControlSets = Get-ChildItem "HKLM:\SYSTEM" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'ControlSet[0-9]+' }
 foreach ($cs in $ControlSets) {
     $path = "$($cs.PSPath)\Services\$ServiceName"
     if ($BackupRegistry -and (Test-Path $path)) { 
         Backup-RegistryKey "$($cs.Name)\Services\$ServiceName" 
     }
-    Remove-RegistryKeySafe $path
+    if (-not $WhatIf) { Remove-RegistryKeySafe $path }
 }
 
-# ==================== PASO 3: Limpieza DCOM - AppID ====================
+# ============================================================================
+# PASO 4: Limpieza DCOM - AppID
+# ============================================================================
 Write-Host ""
-Write-Host "[3/6] Buscando y limpiando entradas DCOM (AppID)..." -ForegroundColor Yellow
+Write-Host "[4/7] Buscando y limpiando entradas DCOM (AppID)..." -ForegroundColor Yellow
 
 $appidPath = "HKCR:\AppID"
+$appidCount = 0
 if (Test-Path $appidPath) {
     $appids = Get-ChildItem $appidPath -ErrorAction SilentlyContinue
     foreach ($appid in $appids) {
         try {
             $value = Get-ItemProperty $appid.PSPath -ErrorAction SilentlyContinue
-            # Buscar por nombre de servicio o ejecutable
             if ($value -and ($value.AppID -like "*$ServiceName*" -or 
                             $value."(Default)" -like "*$ServiceDisplayName*" -or
-                            $value.ServiceDll -like "*$ServiceName*")) {
+                            $value."(Default)" -like "*HSLS*")) {
                 
                 if ($BackupRegistry) { Backup-RegistryKey "$($appid.PSPath)" }
-                Write-Host "  • Encontrado AppID relacionado: $($appid.PSChildName)" -ForegroundColor Magenta
+                Write-Host "  • Encontrado AppID: $($appid.PSChildName)" -ForegroundColor Magenta
                 if (-not $WhatIf) {
                     Remove-Item $appid.PSPath -Recurse -Force -ErrorAction SilentlyContinue
-                    Write-Host "  ✓ Eliminado AppID: $($appid.PSChildName)" -ForegroundColor Green
+                    $appidCount++
                 }
             }
         } catch { Write-Warning "  Error procesando AppID: $($appid.PSChildName)" }
     }
 }
+Write-Host "  Total AppID eliminados: $appidCount" -ForegroundColor Cyan
 
-# ==================== PASO 4: Limpieza DCOM - CLSID ====================
+# ============================================================================
+# PASO 5: Limpieza DCOM - CLSID
+# ============================================================================
 Write-Host ""
-Write-Host "[4/6] Buscando y limpiando entradas DCOM (CLSID)..." -ForegroundColor Yellow
+Write-Host "[5/7] Buscando y limpiando entradas DCOM (CLSID)..." -ForegroundColor Yellow
 
 $clsidPath = "HKCR:\CLSID"
+$clsidCount = 0
 if (Test-Path $clsidPath) {
     $clsids = Get-ChildItem $clsidPath -ErrorAction SilentlyContinue
     foreach ($clsid in $clsids) {
         try {
             $value = Get-ItemProperty $clsid.PSPath -ErrorAction SilentlyContinue
             if ($value -and ($value."(Default)" -like "*$ServiceDisplayName*" -or
-                            $value.LocalServer32 -like "*$ServiceName*" -or
+                            $value."(Default)" -like "*HSLS*" -or
+                            $value.LocalServer32 -like "*HSLS*" -or
                             $value.LocalService -like "*$ServiceName*")) {
                 
                 if ($BackupRegistry) { Backup-RegistryKey "$($clsid.PSPath)" }
-                Write-Host "  • Encontrado CLSID relacionado: $($clsid.PSChildName)" -ForegroundColor Magenta
+                Write-Host "  • Encontrado CLSID: $($clsid.PSChildName)" -ForegroundColor Magenta
                 if (-not $WhatIf) {
                     Remove-Item $clsid.PSPath -Recurse -Force -ErrorAction SilentlyContinue
-                    Write-Host "  ✓ Eliminado CLSID: $($clsid.PSChildName)" -ForegroundColor Green
+                    $clsidCount++
                 }
             }
         } catch { Write-Warning "  Error procesando CLSID: $($clsid.PSChildName)" }
     }
 }
+Write-Host "  Total CLSID eliminados: $clsidCount" -ForegroundColor Cyan
 
-# ==================== PASO 5: Limpieza adicional ====================
+# ============================================================================
+# PASO 6: Limpieza adicional (EventLog, Firewall, etc.)
+# ============================================================================
 Write-Host ""
-Write-Host "[5/6] Limpieza adicional..." -ForegroundColor Yellow
+Write-Host "[6/7] Limpieza adicional..." -ForegroundColor Yellow
 
-# Eliminar posibles entradas en EventLog
+# EventLog
 $EventLogReg = "HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\Application\$ServiceName"
-if ($BackupRegistry -and (Test-Path $EventLogReg)) { Backup-RegistryKey "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\EventLog\Application\$ServiceName" }
-Remove-RegistryKeySafe $EventLogReg
+if ($BackupRegistry -and (Test-Path $EventLogReg)) { 
+    Backup-RegistryKey "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\EventLog\Application\$ServiceName" 
+}
+if (-not $WhatIf) { Remove-RegistryKeySafe $EventLogReg }
 
-# Eliminar entradas de firewall si existen
+# También buscar por HSLS en EventLog
+$EventLogHSLS = Get-ChildItem "HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\Application" -ErrorAction SilentlyContinue | 
+                Where-Object { $_.Name -like "*HSLS*" }
+foreach ($log in $EventLogHSLS) {
+    if ($BackupRegistry) { Backup-RegistryKey "$($log.PSPath)" }
+    if (-not $WhatIf) { 
+        Remove-Item $log.PSPath -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "  ✓ Eliminado EventLog: $($log.Name)" -ForegroundColor Green
+    }
+}
+
+# Firewall rules
 $FirewallReg = "HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules"
 if (Test-Path $FirewallReg) {
     $rules = Get-ItemProperty $FirewallReg -ErrorAction SilentlyContinue | 
              Get-Member -MemberType NoteProperty | 
-             Where-Object { $_.Name -like "*$ServiceName*" -or $_.Name -like "*$ServiceDisplayName*" }
+             Where-Object { $_.Name -like "*HSLS*" -or $_.Name -like "*$ServiceName*" }
     foreach ($rule in $rules) {
         if (-not $WhatIf) {
             Remove-ItemProperty -Path $FirewallReg -Name $rule.Name -Force -ErrorAction SilentlyContinue
-            Write-Host "  ✓ Eliminado regla de firewall: $($rule.Name)" -ForegroundColor Green
+            Write-Host "  ✓ Eliminado regla firewall: $($rule.Name)" -ForegroundColor Green
         }
     }
 }
 
-# ==================== PASO 6: Verificación final ====================
+# ============================================================================
+# PASO 7: Verificación final
+# ============================================================================
 Write-Host ""
-Write-Host "[6/6] Verificación final..." -ForegroundColor Yellow
+Write-Host "[7/7] Verificación final..." -ForegroundColor Yellow
 
 $remaining = @()
 $remaining += Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-$remaining += Get-ChildItem "HKLM:\SYSTEM\CurrentControlSet\Services" -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*$ServiceName*" }
-$remaining += Get-ChildItem "HKCR:\AppID" -ErrorAction SilentlyContinue | Where-Object { 
-    (Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue)."(Default)" -like "*$ServiceDisplayName*" 
-}
+$remaining += Get-Service | Where-Object { $_.DisplayName -like "*$ServiceDisplayName*" }
+$remaining += Get-ChildItem "HKLM:\SYSTEM\CurrentControlSet\Services" -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*$ServiceName*" -or $_.Name -like "*HSLS*" }
 
-if ($remaining.Count -eq 0) {
+Write-Host ""
+if ($remaining.Count -eq 0 -and -not $WhatIf) {
+    Write-Host "========================================" -ForegroundColor Green
+    Write-Host "  ✅ ¡ELIMINACIÓN COMPLETADA!" -ForegroundColor Green
+    Write-Host "========================================" -ForegroundColor Green
     Write-Host ""
-    Write-Host "✅ ¡Eliminación completada exitosamente!" -ForegroundColor Green
-    Write-Host "   Se recomienda REINICIAR el equipo para aplicar todos los cambios." -ForegroundColor Cyan
+    Write-Host "  El servicio '$ServiceDisplayName' ha sido eliminado completamente." -ForegroundColor White
+    Write-Host ""
+    Write-Host "  📁 Backups del registro guardados en:" -ForegroundColor Cyan
+    Write-Host "      $env:TEMP\RegistryBackup_HSLS" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  ⚠️  IMPORTANTE: Debes REINICIAR el equipo para aplicar todos los cambios." -ForegroundColor Red
+    Write-Host ""
+    $restart = Read-Host "  ¿Deseas reiniciar ahora? (S/N)"
+    if ($restart -eq 'S' -or $restart -eq 's') {
+        Restart-Computer -Force
+    }
 } else {
+    Write-Host "========================================" -ForegroundColor Yellow
+    Write-Host "  ⚠️  ELIMINACIÓN PARCIAL" -ForegroundColor Yellow
+    Write-Host "========================================" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "⚠️  Aún se encontraron $($remaining.Count) elementos relacionados:" -ForegroundColor Red
-    $remaining | ForEach-Object { Write-Host "   • $($_.Name)" -ForegroundColor Red }
+    Write-Host "  Aún se encontraron $($remaining.Count) elementos relacionados:" -ForegroundColor Red
+    $remaining | ForEach-Object { Write-Host "     • $($_.Name)" -ForegroundColor Red }
     Write-Host ""
-    Write-Host "   Puede requerir reinicio o eliminación manual adicional." -ForegroundColor Yellow
+    Write-Host "  Puede requerir reinicio o eliminación manual adicional." -ForegroundColor Yellow
+    Write-Host ""
 }
 
 Write-Host ""
-Write-Host "========================================" -ForegroundColor Cyan
-
-
+Write-Host "Presiona cualquier tecla para salir..." -ForegroundColor Gray
+pause
 
 ==========
 ==========
@@ -1320,6 +1437,7 @@ catch {
     Write-Log "ERROR CRÍTICO EN SCRIPT: $($_.Exception.Message)"
     Write-Log "Línea de error: $($_.InvocationInfo.ScriptLineNumber)"
 }
+
 
 
 
